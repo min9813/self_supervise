@@ -1,0 +1,40 @@
+DATA:
+  batch_size: 64
+  cifar_root_dir: /home/min9813/project/data/cifar-10-batches-py
+  cifar_meta_file: batches.meta
+  cifar_train_reg_exp: data_batch*[1|2|3|4]
+  cifar_val_reg_exp: data_batch_5
+  cifar_test_reg_exp: test_batch
+
+TRAIN:
+  total_epoch: 100
+  start_epoch: 1
+  rec_loss: mse
+  fp16: False
+  self_supervise_method: rotate
+
+OPTIM:
+  optimizer: adam
+  lr: 0.001
+  lr_scheduler: "no"
+
+LOG:
+  save_dir: ../logs
+  train_print_iter: 10000
+
+MODEL:
+  save_dir: ../models
+  resume_net_path: ""  
+  resume_opt_path: ""
+  resume: False
+  network: resnet18
+  head: 1layer
+
+debug: False
+run_mode: train
+seed: 1234
+gpus: "0"
+use_multi_gpu: False
+cuda_id: 0
+num_workers: 4
+input_ch: 3

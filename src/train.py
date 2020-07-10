@@ -14,15 +14,22 @@ import numpy as np
 import pandas as pd
 import cv2
 import torch
+import torchvision.models as models
 import torch.nn as nn
 import torch.nn.functional as F
 import scipy
 import lib.utils.logger_config as logger_config
 import lib.utils.average_meter as average_meter
+import lib.utils.epoch_func as epoch_func
+import lib.utils.get_aug_and_trans as get_aug_and_trans
 import lib.network as network
 from torch.optim import lr_scheduler
 from lib.utils.configuration import cfg as args
 from lib.utils.configuration import cfg_from_file, format_dict
+try:
+    from apex import amp
+except ImportError:
+    fp16 = False
 
 
 def fix_seed(seed=0):
@@ -89,6 +96,21 @@ def train():
         args.TRAIN.total_epoch = 500
         args.LOG.train_print_iter = 1
 
+    args.TRAIN.fp16 = args.TRAIN.fp16 and fp16
+
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+    trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans(
+        False, False, False, mean=mean, std=std)
+
+    trn_dataset = cifar.Cifar10("train", args, msglogger, trans)
+    train_loader = torch.utils.data.DataLoader(
+        trn_dataset, batch_size=args.DATA.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=True)
+
+    val_dataset = cifar.Cifar10("val", args, msglogger, trans)
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=args.DATA.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=False)
+
     for key, value in vars(args).items():
         if isinstance(value, dict):
             for key2, value2 in value.items():
@@ -96,21 +118,38 @@ def train():
         else:
             msglogger.debug("{}:{}".format(key, value))
 
+    if args.MODEL.network == "resnet18":
+        net = network.resnset.resnet18(pretrained=False)
+
+    if args.MODEL.head == "1layer":
+        head = network.head.Head(512, args.n_classes)
+
     if args.MODEL.resume:
         net, start_epoch = network.model_io.load_model(
             net, args.MODEL.resume_net_path, logger=msglogger)
         args.TRAIN.start_epoch = start_epoch
 
+    criterion = nn.CrossEntropyLoss()
+
+    wrapper = network.wrapper.LossWrap(args, net, head, criterion)
+    wrapper = wrapper.cuda()
+
     if args.run_mode == "test":
         pass
     elif args.run_mode == "train":
-        
+
         if args.OPTIM.optimizer == "adam":
             optimizer = torch.optim.Adam(
-                net.parameters(), lr=args.OPTIM.lr, weight_decay=5e-4)
+                [
+                    net.parameters(), lr=args.OPTIM.lr, weight_decay=5e-4,
+                    head.parameters(), lr=args.OPTIM.lr, weight_decay=5e-4,
+                ]
+            )
         elif args.TRAIN.optimizer == "sgd":
-            optimizer = torch.optim.SGD(net.parameters(
-            ), lr=args.OPTIM.lr, nesterov=True, momentum=0.9, weight_decay=5e-4)
+            optimizer = torch.optim.SGD([
+                net.parameters(), lr=args.OPTIM.lr, nesterov=True, momentum=0.9, weight_decay=5e-4
+                head.parameters(), lr=args.OPTIM.lr, weight_decay=5e-4,
+            ])
         else:
             raise NotImplementedError
 
@@ -138,15 +177,56 @@ def train():
 
         args.lr = args.OPTIM.lr
 
+        best_score = -1
+        best_iter = -1
         for epoch in range(args.TRAIN.start_eopch, args.TRAIN.total_epoch+1):
-            pass
+            trn_info, train_logits = epoch_func.train_epoch(
+                wrapper, train_loader, optimizer, epoch, args, logger=trn_logger)
+            val_info, val_logits = epoch_func.train_epoch(
+                wrapper, val_loader, optimizer, epoch, args, logger=val_logger)
+            val_result = epoch_func.valid_inference(
+                wrapper.model, train_loader, val_loader, args, val_logger)
+            for param_group in optimizer.param_groups:
+                lr = param_group["lr"]
+                break
+
+            score = val_result["linear_acc"]
+            msg = "Epoch:[{}/{}] lr:{}".format(epoch,
+                                               args.TRAIN.total_epoch, lr)
+            for name, value in val_result.items():
+                msg += "{}:{:.4f} ".format(name, value)
+            msglogger.info(msg)
+
+            msg = "Valid: "
+            for name, value in val_info.items():
+                msg += "{}:{:.4f}".format(name, value)
+            msglogger.info(msg)
+
+            msg = "TRAIN: "
+            for name, value in trn_info.items():
+                msg += "{}:{:.4f}".format(name, value)
+            msglogger.info(msg)
+
+            is_best = best_score < val_result["linear_acc"]
+            if is_best:
+                best_score = val_result["linear_acc"]
+                best_iter = epoch
+            network.model_io.save_model(wrapper, optimizer, val_result, is_best, epoch,
+                                        logger=msglogger, multi_gpus=args.multi_gpus,
+                                        model_save_dir=args.MODEL.save_dir, delete_old=args.MODEL.delete_old)
 
             """
             add  
             network.model_io.save_model(wrapper, optimizer, score, is_best, epoch, 
                                         logger=msglogger, multi_gpus=args.multi_gpus, 
                                         model_save_dir=args.model_save_dir, delete_old=args.delete_old)
-            """            
+            """
+            if args.debug:
+                if epoch >= 2:
+                    break
+
+        msglogger.info("Best Iter = {} loss={:.4f}".format(
+            best_iter, best_score))
 
 
 if __name__ == "__main__":

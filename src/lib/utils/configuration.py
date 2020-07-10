@@ -16,8 +16,20 @@ __C.DATA = edict()
 __C.LOG = edict()
 __C.MODEL = edict()
 
+__C.DATA.batch_size = 64
+__C.DATA.cifar_root_dir = ""
+__C.DATA.cifar_meta_file = ""
+__C.DATA.cifar_train_reg_exp = ""
+__C.DATA.cifar_val_reg_exp = ""
+__C.DATA.cifar_test_reg_exp = ""
+__C.DATA.cifar_train_class = [0,1,2,3,4,5,6,7,8,9]
+__C.DATA.cifar_val_class = [0,1,2,3,4,5,6,7,8,9]
+__C.DATA.cifar_test_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
 __C.TRAIN.total_epoch = 100
 __C.TRAIN.start_epoch = 1
+__C.TRAIN.self_supervise_method = "rotate"
+__C.TRAIN.fp16 = False
 
 __C.OPTIM.optimizer = "adam"
 __C.OPTIM.lr = 1e-4
@@ -32,11 +44,17 @@ __C.OPTIM.lr_tmax = 1
 
 __C.LOG.save_dir = "../logs"
 __C.LOG.train_print_iter = 200
+__C.LOG.train_print = True
+
 
 __C.MODEL.save_dir = "../models"
+__C.MODEL.delete_old = True
 __C.MODEL.resume_net_path = ""
 __C.MODEL.resume_opt_path = ""
 __C.MODEL.resume = False
+__C.MODEL.num_classes = 4
+__C.MODEL.network = "resnet18"
+__C.MODEL.head = "1layer"
 
 __C.debug = True
 __C.run_mode = "train"
@@ -45,6 +63,9 @@ __C.gpus = "0"
 __C.use_multi_gpu = False
 __C.is_cpu = False
 __C.cuda_id = 0
+__C.num_workers = 4
+__C.input_ch = 3
+
 
 def format_dict(cfg):
     ng_names = []
