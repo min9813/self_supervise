@@ -1,18 +1,26 @@
 DATA:
-  batch_size: 64
+  batch_size: 1024
   cifar_root_dir: /home/min9813/project/data/cifar-10-batches-py
   cifar_meta_file: batches.meta
-  cifar_train_reg_exp: data_batch*[1|2|3|4]
-  cifar_val_reg_exp: data_batch_5
+  cifar_train_reg_exp: data_batch*[1|2|3|4|5]
+  cifar_train_class: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  cifar_val_reg_exp: data_batch*[1|2|3|4|5]
+  cifar_val_class: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  
   cifar_test_reg_exp: test_batch
-
   feature_root_dir: /home/min9813/project/data/cifar_feature/
+  feature_train_reg_exp: simclr_train/exp1/epoch_00040/train.pickle
+  feature_val_reg_exp: simclr_train/exp1/epoch_00040/valid.pickle
+  feature_train_class: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  feature_val_class: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
 
 TRAIN:
   total_epoch: 100
   start_epoch: 1
   fp16: False
-  self_supervise_method: rotate
+  self_supervised_method: simclr
+  finetune_linear: True
 
 OPTIM:
   optimizer: adam
@@ -30,9 +38,10 @@ MODEL:
   resume: False
   network: resnet18
   head: 1layer
-  delete_old: False
+  delete_old: True
+  linear_layers: []
 
-debug: True
+debug: False
 run_mode: train
 seed: 1234
 gpus: "0"
@@ -40,4 +49,4 @@ use_multi_gpu: False
 cuda_id: 0
 num_workers: 4
 input_ch: 3
-num_classes: 4
+num_classes: 10

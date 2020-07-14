@@ -12,7 +12,9 @@ TRAIN:
   total_epoch: 100
   start_epoch: 1
   fp16: False
-  self_supervise_method: rotate
+  self_supervised_method: simclr
+  color_aug: True
+  shape_aug: True
 
 OPTIM:
   optimizer: adam
@@ -40,4 +42,4 @@ use_multi_gpu: False
 cuda_id: 0
 num_workers: 4
 input_ch: 3
-num_classes: 4
+num_classes: 128

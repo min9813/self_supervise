@@ -25,6 +25,13 @@ class Cifar10(data.Dataset):
         self.trans = trans
         self.c_aug = c_aug
         self.s_aug = s_aug
+        self.logger.info("### USE COLOR AUGUMENTATION ###")
+        self.logger.info(str(c_aug))
+
+        self.logger.info("### USE SHAPE AUGUMENTATION ###")
+        self.logger.info(str(s_aug))
+
+        self.mode = "train"
 
         self.logger.info(f"setup cifar {split} ==>")
         cifar_data = self.setup_cifar()
@@ -74,11 +81,13 @@ class Cifar10(data.Dataset):
             if np.any(use_mask):
                 use_images = images[use_mask]
                 all_data.append(use_images)
-                all_labels.append(this_batch["labels"][use_mask])
+                labels = np.array(this_batch["labels"])
+                all_labels.append(labels[use_mask])
 
         all_data = np.concatenate(all_data, axis=0)
         all_labels = np.concatenate(all_labels, axis=0)
-        self.logger.info("pick up {} class = {}, data num = {}".format(self.split, pickup_class, len(all_data)))
+        self.logger.info("pick up {} class = {}, data num = {}".format(
+            self.split, pickup_class, len(all_data)))
 
         cifar_data = {
             "data": all_data,
@@ -91,29 +100,62 @@ class Cifar10(data.Dataset):
     def __len__(self):
         return len(self.dataset["data"])
 
+    def augment_simclr(self, data):
+        data1 = self.c_aug(image=data)
+        if self.s_aug is not None:
+            data1 = self.s_aug(image=data1)
+        if self.trans is not None:
+            data1 = self.trans(data1)
+
+        return data1
+
+    def set_eval(self):
+        self.mode = "eval"
+
+    def set_train(self):
+        self.mode = "train"
+
     def pickup(self, index):
         data = self.dataset["data"][index]
         label = self.dataset["labels"][index]
         # transpose from (C, W, H) -> (W, H, C)
         data = data.transpose(1, 2, 0)
 
-        if self.args.TRAIN.seff.supervise_method == "rotate":
+        if self.args.TRAIN.self_supervised_method == "rotate":
             rotate_num = np.random.randint(4)
             for i in range(rotate_num):
-                data = np.rot90(data)
+                data = np.rot90(data).copy()
+
+            if self.trans is not None:
+                data = self.trans(data)
             pseudo_label = rotate_num
+            picked_data = {
+                "data": data,
+                "label": pseudo_label
+            }
+        elif self.args.TRAIN.self_supervised_method == "simclr":
+            if self.mode == "train":
+                data1 = self.augment_simclr(data)
+                data2 = self.augment_simclr(data)
+            elif self.mode == "eval":
+                data1 = self.trans(data)
+                data2 = -1
+            pseudo_label = -1
+            picked_data = {
+                "data": data1,
+                "data2": data2,
+                "label": pseudo_label,
+            }
         else:
             raise NotImplementedError
 
-        if self.trans is not None:
-            data = self.trans(data)
-
 
         # print(self.dataset["meta_data"], label)
-        data = {"data": data, "real_label": label, "pseudo_label": pseudo_label,
-                "label_name": self.dataset["meta_data"]["label_names"][label]}
+        other_data = {"real_label": label,
+                      "label_name": self.dataset["meta_data"]["label_names"][label]}
+        picked_data.update(other_data)
 
-        return data
+        return picked_data
 
     def __getitem__(self, index):
         picked_data = self.pickup(index)

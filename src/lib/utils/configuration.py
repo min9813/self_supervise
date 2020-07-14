@@ -22,14 +22,27 @@ __C.DATA.cifar_meta_file = ""
 __C.DATA.cifar_train_reg_exp = ""
 __C.DATA.cifar_val_reg_exp = ""
 __C.DATA.cifar_test_reg_exp = ""
-__C.DATA.cifar_train_class = [0,1,2,3,4,5,6,7,8,9]
-__C.DATA.cifar_val_class = [0,1,2,3,4,5,6,7,8,9]
+__C.DATA.cifar_train_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+__C.DATA.cifar_val_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 __C.DATA.cifar_test_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+__C.DATA.feature_root_dir = ""
+__C.DATA.feature_train_reg_exp = ""
+__C.DATA.feature_val_reg_exp = ""
+__C.DATA.feature_test_reg_exp = ""
+__C.DATA.feature_train_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+__C.DATA.feature_val_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+__C.DATA.feature_test_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+__C.DATA.feature_save_freq = 25
 
 __C.TRAIN.total_epoch = 100
 __C.TRAIN.start_epoch = 1
-__C.TRAIN.self_supervise_method = "rotate"
+__C.TRAIN.self_supervised_method = "rotate"
 __C.TRAIN.fp16 = False
+__C.TRAIN.finetune_linear = False
+__C.TRAIN.shuffle_simclr = True
+__C.TRAIN.logit_scale = 16
+__C.TRAIN.color_aug = False
+__C.TRAIN.shape_aug = False
 
 __C.OPTIM.optimizer = "adam"
 __C.OPTIM.lr = 1e-4
@@ -52,9 +65,9 @@ __C.MODEL.delete_old = True
 __C.MODEL.resume_net_path = ""
 __C.MODEL.resume_opt_path = ""
 __C.MODEL.resume = False
-__C.MODEL.num_classes = 4
 __C.MODEL.network = "resnet18"
 __C.MODEL.head = "1layer"
+__C.MODEL.linear_layers = []
 
 __C.debug = True
 __C.run_mode = "train"
@@ -64,6 +77,7 @@ __C.use_multi_gpu = False
 __C.is_cpu = False
 __C.cuda_id = 0
 __C.num_workers = 4
+__C.num_classes = 4
 __C.input_ch = 3
 
 
@@ -94,7 +108,8 @@ def format_dict(cfg):
         msg = ""
         for name in ng_names:
             msg += f"{name[0]} in ({name[1]},{name[2]})\n"
-        raise ValueError(f"Same key can\'t exist in different dictionary \n{msg}")
+        raise ValueError(
+            f"Same key can\'t exist in different dictionary \n{msg}")
 
     for key1 in key_list:
         if isinstance(cfg[key1], edict):
