@@ -55,11 +55,19 @@ __C.TRAIN.shuffle_simclr = True
 __C.TRAIN.logit_scale = 16
 __C.TRAIN.color_aug = False
 __C.TRAIN.shape_aug = False
-
+__C.TRAIN.n_way = 5
+__C.TRAIN.n_query = 15
+__C.TRAIN.n_support = 5
 
 __C.TEST.neighbor_k = 200
 __C.TEST.batch_size = 2000
 __C.TEST.test_logit_scale = 2
+__C.TEST.n_way = 5
+__C.TEST.n_query = 15
+__C.TEST.n_support = 5
+__C.TEST.few_shot_n_test = 1000
+__C.TEST.distance_metric = "l2euc"
+__C.TEST.mode = "few_show"
 
 __C.OPTIM.optimizer = "adam"
 __C.OPTIM.lr = 1e-4

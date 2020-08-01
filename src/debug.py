@@ -18,6 +18,7 @@ import torchvision.models as models
 import torch.nn as nn
 import torch.nn.functional as F
 import scipy
+import lib.evaluation as evaluation
 import lib.dataset as dataset
 import lib.lossfunction as lossfunction
 import lib.utils.logger_config as logger_config
@@ -140,5 +141,35 @@ def train():
         if idx > 10:
             break
 
+def debug_fewshot_eval():
+    if len(sys.argv) == 2:
+        cfg_file = sys.argv[1]
+        cfg_from_file(cfg_file)
+    else:
+        cfg_file = "default"
+
+    # features = np.random.randn(300, 32)
+    sample_n = 30
+    n_class = 20
+    features = [np.random.randn(32) for i in range(n_class)]
+    all_feats = []
+    for feats in features:
+        for j in range(sample_n):
+            if j%2 == 0:
+                all_feats.append(feats)
+            else:
+                all_feats.append(np.random.randn(32))
+    
+    # features = [feats+np.random.random()*1e-3 for feats in features for j in range(sample_n)]
+    features = np.array(all_feats)
+    print("feature shape:", features.shape)
+    labels = [np.full(sample_n, i) for i in range(n_class)]
+    labels = np.concatenate(labels)
+
+    result = evaluation.few_shot_eval.evaluate_fewshot(features, labels, args)
+    print(result)
+
+
 if __name__ == "__main__":
-    train()
+    # train()
+    debug_fewshot_eval()

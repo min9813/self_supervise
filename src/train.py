@@ -134,13 +134,13 @@ def train():
     # for data in train_loader:
     #     print(data["data"].size())
     # dsklfal
-    memory_loader = torch.utils.data.DataLoader(
-        trn_dataset, batch_size=args.DATA.batch_size, shuffle=False, num_workers=args.num_workers, drop_last=False)
+    # memory_loader = torch.utils.data.DataLoader(
+        # trn_dataset, batch_size=args.DATA.batch_size, shuffle=False, num_workers=args.num_workers, drop_last=False)
 
     #     print(data["data"].size())
     # fkldsj
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=args.DATA.batch_size, shuffle=False, num_workers=args.num_workers, drop_last=False)
+        val_dataset, batch_size=args.DATA.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=False)
 
     # for data in val_loader:
     #     print(data["data"].size())
@@ -294,17 +294,32 @@ def train():
             # score = val_result["linear_acc"]
             if args.TRAIN.finetune_linear:
                 score = val_info["acc"]
-            else:
+                val_msg = "Test: "
+                for name, value in val_result.items():
+                    val_msg += "{}:{:.4f} ".format(name, value)
+            elif args.TEST.mode == "knn_eval":
                 # score = val_info["pseudo_acc"]
                 score = val_result["top1"]
+                val_msg = "Test: "
+                for name, value in val_result.items():
+                    val_msg += "{}:{:.4f} ".format(name, value)
+            elif args.TEST.mode == "few_shot":
+                score = val_result["mean_acc_{}".format(args.TEST.n_support)]
+                val_msg = "Test: "
+                for name, value in val_result.items():
+                    if name.startswith("mean"):
+                        val_msg += "{}:{:.4f} ".format(name, value)
+                val_msg += "\n"
+                key_list = sorted(list(val_result.keys()))
+                for name in key_list:
+                    if name.startswith("each_"):
+                        val_msg += "{}:{:.4f} ".format(name, val_result[name])
+
             iter_end = time.time() - train_since
             msg = "Epoch:[{}/{}] lr:{} elapsed_time:{:.4f}s mean epoch time:{:.4f}s".format(epoch,
                                                                                             args.TRAIN.total_epoch, lr, iter_end, iter_end/epoch)
             msglogger.info(msg)
-            msg = "Test: "
-            for name, value in val_result.items():
-                msg += "{}:{:.4f} ".format(name, value)
-            msglogger.info(msg)
+            msglogger.info(val_msg)
 
             msg = "Valid: "
             for name, value in val_info.items():

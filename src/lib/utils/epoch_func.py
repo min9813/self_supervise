@@ -15,6 +15,7 @@ import torch
 import torchvision
 import lib.utils.average_meter as average_meter
 import lib.utils.simclr_utils as simclr_utils
+import lib.evaluation.few_shot_eval as few_shot_eval
 from tqdm import tqdm
 from sklearn import linear_model
 try:
@@ -222,12 +223,15 @@ def valid_inference(net, base_loader, epoch, args, val_loader=None, logger=None)
     # with open(save_feature_path, "wb") as pkl:
     #     pickle.dump(output_val_feats, pkl)
     # return output_val_feats
-        result = linear_eval(train_logits, train_labels,
-                            valid_logits, valid_labels, args, logger)
+        if args.TEST.mode == "knn_eval":
+            result = knn_eval(train_logits, train_labels,
+                                valid_logits, valid_labels, args, logger)
+        elif args.TEST.mode == "few_shot":
+            result = few_shot_eval.evaluate_fewshot(train_logits.numpy(), train_labels.numpy(), args)
     return result
 
 
-def linear_eval(x_data, y_data, x_test, y_test, args, logger, has_same=False):
+def knn_eval(x_data, y_data, x_test, y_test, args, logger, has_same=False):
     logger.info(f"start knn(k={args.TEST.neighbor_k}) ... ")
     top1_acc = 0
     top5_acc = 0
