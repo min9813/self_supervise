@@ -12,13 +12,14 @@ TRAIN:
   total_epoch: 500
   start_epoch: 1
   fp16: True
+  # fp16: False
   self_supervised_method: simclr
   color_aug: True
   shape_aug: True
-  logit_scale: 8
+  logit_scale: 2
 
 TEST:
-  test_logit_scale: 8
+  test_logit_scale: 2
   neighbor_k: 200
   batch_size: 2000
 

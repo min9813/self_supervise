@@ -9,8 +9,8 @@ DATA:
   
   cifar_test_reg_exp: test_batch
   feature_root_dir: /home/min9813/project/data/cifar_feature/
-  feature_train_reg_exp: simclr_train/exp1_longer_scheduler/epoch_00100/train.pickle
-  feature_val_reg_exp: simclr_train/exp1_longer_scheduler/epoch_00100/valid.pickle
+  feature_train_reg_exp: simclr_train/exp1_longer/epoch_00100/train.pickle
+  feature_val_reg_exp: simclr_train/exp1_longer/epoch_00100/valid.pickle
   feature_train_class: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   feature_val_class: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 

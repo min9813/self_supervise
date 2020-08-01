@@ -30,6 +30,7 @@ from lib.utils.configuration import cfg as args
 from lib.utils.configuration import cfg_from_file, format_dict
 try:
     from apex import amp
+    fp16 = True
 except ImportError:
     fp16 = False
 
@@ -104,8 +105,10 @@ def train():
 
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
-    trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans(
-        args.TRAIN.color_aug, args.TRAIN.shape_aug, mean=mean, std=std)
+    # trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans(
+    #     args.TRAIN.color_aug, args.TRAIN.shape_aug, mean=mean, std=std)
+    trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans_torch(
+        args.TRAIN.color_aug, args.TRAIN.shape_aug, mean=mean, std=std, image_size=args.DATA.image_size)
 
     if args.TRAIN.finetune_linear:
         trn_dataset = dataset.feature_dataset.FeatureDataset(
@@ -114,14 +117,30 @@ def train():
             "val", args, msglogger)
 
     else:
-        trn_dataset = dataset.cifar.Cifar10("train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
-        val_dataset = dataset.cifar.Cifar10("val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+        if args.DATA.dataset == "cifar10":
+            trn_dataset = dataset.cifar.Cifar10(
+                "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+            val_dataset = dataset.cifar.Cifar10(
+                "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+        elif args.DATA.dataset == "miniimagenet":
+            trn_dataset = dataset.miniimagenet.MiniImageNet(
+                "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+            val_dataset = dataset.miniimagenet.MiniImageNet(
+                "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+            args.has_same = True
 
     train_loader = torch.utils.data.DataLoader(
         trn_dataset, batch_size=args.DATA.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=True)
+    # for data in train_loader:
+    #     print(data["data"].size())
+    # dsklfal
+    memory_loader = torch.utils.data.DataLoader(
+        trn_dataset, batch_size=args.DATA.batch_size, shuffle=False, num_workers=args.num_workers, drop_last=False)
 
+    #     print(data["data"].size())
+    # fkldsj
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=args.DATA.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=False)
+        val_dataset, batch_size=args.DATA.batch_size, shuffle=False, num_workers=args.num_workers, drop_last=False)
 
     # for data in val_loader:
     #     print(data["data"].size())
@@ -147,12 +166,20 @@ def train():
     else:
         if args.MODEL.network == "resnet18":
             net = network.resnet.resnet18(pretrained=False)
-
+            feature_dim = 512
+        elif args.MODEL.network == "resnet34":
+            net = network.resnet.resnet34(pretrained=False)
+            feature_dim = 512
+        elif args.MODEL.network == "resnet50":
+            net = network.resnet.resnet50(pretrained=False)
+            feature_dim = 2048
+        # net = network.test_model.Model()
+        # feature_dim = 512
         if len(args.MODEL.linear_layers):
             head = network.head.MLP(
-                512, args.num_classes, args.MODEL.linear_layers)
+                feature_dim, args.num_classes, args.MODEL.linear_layers)
         else:
-            head = network.head.Head(512, args.num_classes)
+            head = network.head.Head(feature_dim, args.num_classes)
         msg = "   HEAD   "
         msglogger.info("#"*15+msg + "#"*15)
         msglogger.info(str(head))
@@ -173,7 +200,8 @@ def train():
         wrapper = network.wrapper.LossWrapLinear(args, net, criterion)
     else:
         if args.TRAIN.self_supervised_method == "simclr":
-            wrapper = network.wrapper.LossWrapSimCLR(args, net, head, criterion)
+            wrapper = network.wrapper.LossWrapSimCLR(
+                args, net, head, criterion)
         else:
             wrapper = network.wrapper.LossWrap(args, net, head, criterion)
 
@@ -186,12 +214,12 @@ def train():
         if args.OPTIM.optimizer == "adam":
             parameters = [
                 {"params": net.parameters(), "lr": args.OPTIM.lr,
-                 "weight_deacy": 5e-4},
+                 "weight_deacy": 1e-6},
             ]
             if not args.TRAIN.finetune_linear:
                 parameters.append(
                     {"params": head.parameters(), "lr": args.OPTIM.lr,
-                     "weight_deacy": 5e-4},
+                     "weight_deacy": 1e-6},
                 )
             optimizer = torch.optim.Adam(
                 parameters
@@ -199,18 +227,23 @@ def train():
         elif args.TRAIN.optimizer == "sgd":
             parameters = [
                 {"params": net.parameters(), "lr": args.OPTIM.lr,
-                 "weight_deacy": 5e-4, "momentum": 0.9},
+                 "weight_deacy": 1e-6, "momentum": 0.9},
             ]
             if not args.TRAIN.finetune_linear:
                 parameters.append(
                     {"params": head.parameters(), "lr": args.OPTIM.lr,
-                     "weight_deacy": 5e-4, "momentum": 0.9},
+                     "weight_deacy": 1e-6, "momentum": 0.9},
                 )
             optimizer = torch.optim.SGD(
                 parameters
             )
         else:
             raise NotImplementedError
+
+        if args.TRAIN.fp16:
+            opt_level = "O1"
+            (wrapper,), (optimizerr) = amp.initialize(
+                [wrapper], [optimizer], opt_level=opt_level)
 
         if args.OPTIM.lr_scheduler == 'multi-step':
             milestones = args.OPTIM.lr_milestones
@@ -238,17 +271,20 @@ def train():
 
         best_score = -1
         best_iter = -1
+        train_since = time.time()
         for epoch in range(args.TRAIN.start_epoch, args.TRAIN.total_epoch+1):
-            iter_since = time.time()
             msglogger.info("Start epoch {}".format(epoch))
             trn_info = epoch_func.train_epoch(
                 wrapper, train_loader, optimizer, epoch, args, logger=trn_logger)
             val_info = epoch_func.valid_epoch(
                 wrapper, val_loader, epoch, args, logger=val_logger)
+            # trn_info = {"acc":0}
+            # val_info = {"acc": 0}
+            val_result = None
             if not args.TRAIN.finetune_linear:
-                if epoch % args.DATA.feature_save_freq == 0 and epoch > 0:
-                    epoch_func.valid_inference(
-                        wrapper.model, train_loader, val_loader, epoch, args, val_logger)
+                # if epoch % args.DATA.feature_save_freq == 0 and epoch > 0:
+                val_result = epoch_func.valid_inference(
+                    wrapper.model, val_loader, epoch, args, logger=val_logger)
             # val_result = epoch_func.valid_inference(
             #     wrapper.model, train_loader, val_loader, args, val_logger)
             for param_group in optimizer.param_groups:
@@ -259,13 +295,15 @@ def train():
             if args.TRAIN.finetune_linear:
                 score = val_info["acc"]
             else:
-                score = val_info["pseudo_acc"]
-            iter_end = time.time() - iter_since
-            iter_since = time.time()
-            msg = "Epoch:[{}/{}] lr:{} elapsed_time:{:.4f}s".format(epoch,
-                                               args.TRAIN.total_epoch, lr, iter_end)
-            # for name, value in val_result.items():
-            #     msg += "{}:{:.4f} ".format(name, value)
+                # score = val_info["pseudo_acc"]
+                score = val_result["top1"]
+            iter_end = time.time() - train_since
+            msg = "Epoch:[{}/{}] lr:{} elapsed_time:{:.4f}s mean epoch time:{:.4f}s".format(epoch,
+                                                                                            args.TRAIN.total_epoch, lr, iter_end, iter_end/epoch)
+            msglogger.info(msg)
+            msg = "Test: "
+            for name, value in val_result.items():
+                msg += "{}:{:.4f} ".format(name, value)
             msglogger.info(msg)
 
             msg = "Valid: "

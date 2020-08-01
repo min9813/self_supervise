@@ -2,23 +2,23 @@ DATA:
   batch_size: 1024
   cifar_root_dir: /home/min9813/project/data/cifar-10-batches-py
   cifar_meta_file: batches.meta
-  cifar_train_reg_exp: data_batch*[1|2|3|4|5]
-  cifar_val_reg_exp: test_batch
+  cifar_train_reg_exp: data_batch*[1|2|3|4]
+  cifar_val_reg_exp: data_batch_5
   cifar_test_reg_exp: test_batch
 
   feature_root_dir: /home/min9813/project/data/cifar_feature/
 
 TRAIN:
-  total_epoch: 500
+  total_epoch: 1000
   start_epoch: 1
-  fp16: True
+  fp16: False
   self_supervised_method: simclr
   color_aug: True
   shape_aug: True
-  logit_scale: 8
+  logit_scale: 2
 
 TEST:
-  test_logit_scale: 8
+  test_logit_scale: 2
   neighbor_k: 200
   batch_size: 2000
 
@@ -28,8 +28,9 @@ OPTIM:
   lr_scheduler: "patience"
   lr_gamma: 0.1
   lr_cooldown: 5
-  lr_patience: 100000000
+  lr_patience: 10000000
   lr_min: 0.000001
+
 
 LOG:
   save_dir: ../logs
@@ -42,7 +43,7 @@ MODEL:
   resume: False
   network: resnet18
   # head: [512,256]
-  linear_layers: [512, 256]
+  linear_layers: [256]
   delete_old: True
 
 debug: False

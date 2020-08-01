@@ -16,6 +16,7 @@ __C.DATA = edict()
 __C.LOG = edict()
 __C.MODEL = edict()
 
+__C.DATA.dataset = ""
 __C.DATA.batch_size = 64
 __C.DATA.cifar_root_dir = ""
 __C.DATA.cifar_meta_file = ""
@@ -33,6 +34,17 @@ __C.DATA.feature_train_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 __C.DATA.feature_val_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 __C.DATA.feature_test_class = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 __C.DATA.feature_save_freq = 25
+__C.DATA.data_root_dir = ""
+__C.DATA.data_train_reg_exp = ""
+__C.DATA.data_val_reg_exp = ""
+__C.DATA.data_test_reg_exp = ""
+__C.DATA.class_json_files = {
+    "train": "",
+    "val": "",
+    "test": ""
+}
+
+__C.DATA.image_size = 84
 
 __C.TRAIN.total_epoch = 100
 __C.TRAIN.start_epoch = 1
@@ -43,6 +55,11 @@ __C.TRAIN.shuffle_simclr = True
 __C.TRAIN.logit_scale = 16
 __C.TRAIN.color_aug = False
 __C.TRAIN.shape_aug = False
+
+
+__C.TEST.neighbor_k = 200
+__C.TEST.batch_size = 2000
+__C.TEST.test_logit_scale = 2
 
 __C.OPTIM.optimizer = "adam"
 __C.OPTIM.lr = 1e-4

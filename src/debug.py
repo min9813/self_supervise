@@ -104,7 +104,7 @@ def train():
 
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
-    trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans(
+    trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans_torch(
         args.TRAIN.color_aug, args.TRAIN.shape_aug, mean=mean, std=std)
     mean = np.array(mean)[:, None, None]
     std = np.array(std)[:, None, None]
@@ -120,6 +120,7 @@ def train():
 
     save_dir = "./check/simclr"
     make_directory(save_dir)
+    train_loader.dataset.set_eval()
     for idx, data in enumerate(train_loader):
         image = data["data"][0]
         image = image * std + mean
@@ -128,12 +129,12 @@ def train():
         # fkldjgsklj
         image = image.transpose(1, 2, 0)
         image = image.astype(np.uint8)
-        image2 = data["data2"][0]
-        image2 = image2 * std + mean
-        image2 = image2.numpy() * 255
-        image2 = image2.transpose(1, 2, 0)
-        image2 = image2.astype(np.uint8)
-        image = np.concatenate((image, image2), axis=1)
+        # image2 = data["data2"][0]
+        # image2 = image2 * std + mean
+        # image2 = image2.numpy() * 255
+        # image2 = image2.transpose(1, 2, 0)
+        # image2 = image2.astype(np.uint8)
+        # image = np.concatenate((image, image2), axis=1)
         path = os.path.join(save_dir, "{:0>5}.jpg".format(idx))
         cv2.imwrite(path, image)
         if idx > 10:

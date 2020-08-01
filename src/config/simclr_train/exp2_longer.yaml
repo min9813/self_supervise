@@ -11,10 +11,17 @@ DATA:
 TRAIN:
   total_epoch: 500
   start_epoch: 1
-  fp16: False
+  fp16: True
+  # fp16: False
   self_supervised_method: simclr
   color_aug: True
   shape_aug: True
+  logit_scale: 8
+
+TEST:
+  test_logit_scale: 8
+  neighbor_k: 200
+  batch_size: 2000
 
 OPTIM:
   optimizer: adam
@@ -22,7 +29,7 @@ OPTIM:
   lr_scheduler: "patience"
   lr_gamma: 0.1
   lr_cooldown: 5
-  lr_patience: 20
+  lr_patience: 10000000
   lr_min: 0.000001
 
 

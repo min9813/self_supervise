@@ -18,26 +18,45 @@
 # python train.py config/simclr_train/exp1.yaml
 # python train.py config/simclr_train/exp2.yaml
 
-# python train.py config/simclr_train/exp1_longer.yaml
-python train.py config/simclr_train/exp1_longer_scheduler.yaml
+python train.py config/simclr_train/exp1_longer.yaml
+python train.py config/simclr_train/exp1_longer_small.yaml
+# python train.py config/simclr_train/exp1_longer_large_scale.yaml
+# python train.py config/simclr_train/exp1_longer_scheduler.yaml
 python train.py config/simclr_train/exp2_longer.yaml
-python train.py config/simclr_train/exp2_longer_scheduler.yaml
+python train.py config/simclr_train/exp2_longer_small.yaml
+# python train.py config/simclr_train/exp2_longer_scheduler.yaml
 
+# python train.py config/simclr_train/exp1_longer_scale.yaml
+# python train.py config/simclr_train/exp3_longer_scale.yaml
+# python train.py config/simclr_train/exp2_longer_scheduler.yaml
+
+# python train.py config/simclr_train/exp1_longer_res50_wd.yaml
+# python train.py config/simclr_train/exp1_longer_res50_small.yaml
 # python train.py config/simclr_linear/linear1_20.yaml
 # python train.py config/simclr_linear/linear1_40.yaml
 # python train.py config/simclr_linear/linear1_60.yaml
 # python train.py config/simclr_linear/linear1_80.yaml
 # python train.py config/simclr_linear/linear1_100.yaml
-python train.py config/simclr_linear/linear1_longer_100.yaml
-python train.py config/simclr_linear/linear1_longer_200.yaml
-python train.py config/simclr_linear/linear1_longer_300.yaml
-python train.py config/simclr_linear/linear1_longer_400.yaml
-python train.py config/simclr_linear/linear1_longer_500.yaml
-python train.py config/simclr_linear/linear1_longer_scheduler_100.yaml
-python train.py config/simclr_linear/linear1_longer_scheduler_200.yaml
-python train.py config/simclr_linear/linear1_longer_scheduler_300.yaml
-python train.py config/simclr_linear/linear1_longer_scheduler_400.yaml
-python train.py config/simclr_linear/linear1_longer_scheduler_500.yaml
+# python train.py config/simclr_linear/linear1_longer_100.yaml
+# python train.py config/simclr_linear/linear1_longer_200.yaml
+# python train.py config/simclr_linear/linear1_longer_300.yaml
+# python train.py config/simclr_linear/linear1_longer_400.yaml
+# python train.py config/simclr_linear/linear1_longer_500.yaml
+# python train.py config/simclr_linear/linear1_longer_scheduler_100.yaml
+# python train.py config/simclr_linear/linear1_longer_scheduler_200.yaml
+# python train.py config/simclr_linear/linear1_longer_scheduler_300.yaml
+# python train.py config/simclr_linear/linear1_longer_scheduler_400.yaml
+# python train.py config/simclr_linear/linear1_longer_scheduler_500.yaml
+# python train.py config/simclr_linear/linear2_longer_100.yaml
+# python train.py config/simclr_linear/linear2_longer_200.yaml
+# python train.py config/simclr_linear/linear2_longer_300.yaml
+# python train.py config/simclr_linear/linear2_longer_400.yaml
+# python train.py config/simclr_linear/linear2_longer_500.yaml
+# python train.py config/simclr_linear/linear2_longer_scheduler_100.yaml
+# python train.py config/simclr_linear/linear2_longer_scheduler_200.yaml
+# python train.py config/simclr_linear/linear2_longer_scheduler_300.yaml
+# python train.py config/simclr_linear/linear2_longer_scheduler_400.yaml
+# python train.py config/simclr_linear/linear2_longer_scheduler_500.yaml
 # python train.py config/simclr_linear/linear2_20.yaml
 # python train.py config/simclr_linear/linear2_40.yaml
 # python train.py config/simclr_linear/linear2_60.yaml

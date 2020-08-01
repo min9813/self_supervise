@@ -12,11 +12,13 @@ import subprocess
 import logging
 import numpy as np
 import torch.utils.data as data
+import cv2
+from tqdm import tqdm
 from torchvision.transforms import transforms
 from PIL import Image
+from .dataset_utils import cv2pil
 
-
-class Cifar10(data.Dataset):
+class MiniImageNet(data.Dataset):
 
     def __init__(self, split, args, logger, trans=None, c_aug=None, s_aug=None):
         assert split in ("train", "test", "val")
@@ -44,68 +46,67 @@ class Cifar10(data.Dataset):
         self.mode = "train"
 
         self.logger.info(f"setup cifar {split} ==>")
-        cifar_data = self.setup_cifar()
-        self.dataset = cifar_data
+        data = self.setup_data()
+        self.dataset = data
 
-    def setup_cifar(self):
+    def setup_data(self):
         """
-        args.cifar_root_dir
+        args.data_root_dir
         """
         # load meta data
-        meta_data_path = os.path.join(
-            self.args.DATA.cifar_root_dir, self.args.DATA.cifar_meta_file)
-        with open(meta_data_path, "rb") as pkl:
-            meta_data = pickle.load(pkl)
+        class_json_path = os.path.join(
+            self.args.DATA.data_root_dir, self.args.DATA.class_json_files[self.split])
+        with open(class_json_path, "r") as f:
+            class_info = json.load(f)
+
+        print(class_json_path)
+
+        self.class_info = class_info
+
+        class_list = sorted(class_info.keys())
+        name2label = {}
+        for class_name in class_list:
+            if class_name in name2label:
+                continue
+            label = len(name2label)
+            name2label[class_name] = label
 
         if self.split == "train":
-            path_list = pathlib.Path(self.args.DATA.cifar_root_dir).glob(
-                self.args.DATA.cifar_train_reg_exp)
-            pickup_class = self.args.DATA.cifar_train_class
+            path_list = pathlib.Path(self.args.DATA.data_root_dir).glob(
+                self.args.DATA.data_train_reg_exp)
         elif self.split == "val":
-            path_list = pathlib.Path(self.args.DATA.cifar_root_dir).glob(
-                self.args.DATA.cifar_val_reg_exp)
-            pickup_class = self.args.DATA.cifar_val_class
+            path_list = pathlib.Path(self.args.DATA.data_root_dir).glob(
+                self.args.DATA.data_val_reg_exp)
         else:
-            path_list = pathlib.Path(self.args.DATA.cifar_root_dir).glob(
-                self.args.DATA.cifar_test_reg_exp)
-            pickup_class = self.args.DATA.cifar_test_class
-
+            path_list = pathlib.Path(self.args.DATA.data_root_dir).glob(
+                self.args.DATA.data_test_reg_exp)
+        
         all_data = []
-        all_labels = []
-        for path in path_list:
-            with open(str(path), "rb") as pkl:
-                this_batch = pickle.load(pkl, encoding="bytes")
-            """
-            loaded data is (batch, 3*32*32), 3=(RGB)
-            """
-            use_keys = list(this_batch.keys())
-            for key in use_keys:
-                if isinstance(key, str):
-                    continue
-                this_batch[key.decode("ascii")] = this_batch[key]
-                this_batch.pop(key)
+        for path in tqdm(path_list, total=len(class_info)*600):
+            image = cv2.imread(str(path))
+            h, w, c = image.shape
+            assert h == self.args.DATA.image_size
+            image = cv2pil(image)
+            class_name = path.parent.stem
+            # print(path)
+            assert class_name in class_info, class_name
+            label = name2label[class_name]
+            data = {
+                "image": image,
+                "label": label,
+                "label_code": class_name
+            }
+            all_data.append(data)
 
-            images = this_batch["data"].reshape(-1, 3, 32, 32)
-            use_mask = np.isin(this_batch["labels"], pickup_class)
+        self.logger.info("pick up {} class num = {}, data num = {}".format(
+            self.split, len(class_info), len(all_data)))
 
-            if np.any(use_mask):
-                use_images = images[use_mask]
-                all_data.append(use_images)
-                labels = np.array(this_batch["labels"])
-                all_labels.append(labels[use_mask])
-
-        all_data = np.concatenate(all_data, axis=0)
-        all_labels = np.concatenate(all_labels, axis=0)
-        self.logger.info("pick up {} class = {}, data num = {}".format(
-            self.split, pickup_class, len(all_data)))
-
-        cifar_data = {
+        data_data = {
             "data": all_data,
-            "labels": all_labels,
-            "meta_data": meta_data
+            "meta_data": class_info
         }
 
-        return cifar_data
+        return data_data
 
     def __len__(self):
         return len(self.dataset["data"])
@@ -113,7 +114,8 @@ class Cifar10(data.Dataset):
     def augment_simclr(self, data):
         if self.aug_class == "transform":
             # transforms.Compose
-            data = Image.fromarray(data)
+            if not isinstance(data, Image.Image):
+                data = Image.fromarray(data)
             if self.s_aug is not None:
                 data1 = self.s_aug(data)
             data1 = self.c_aug(data1)
@@ -134,33 +136,35 @@ class Cifar10(data.Dataset):
 
     def pickup(self, index):
         data = self.dataset["data"][index]
-        label = self.dataset["labels"][index]
-        # transpose from (C, W, H) -> (W, H, C)
-        data = data.transpose(1, 2, 0)
+        image = data["image"]
+        label = data["label"]
+        label_code = data["label_code"]
+        label_name = self.class_info[label_code]
 
         if self.args.TRAIN.self_supervised_method == "rotate":
             rotate_num = np.random.randint(4)
             for i in range(rotate_num):
-                data = np.rot90(data).copy()
+                image = np.rot90(image).copy()
 
             if self.trans is not None:
-                data = self.trans(data)
+                image = self.trans(image)
             pseudo_label = rotate_num
             picked_data = {
-                "data": data,
-                "label": pseudo_label
+                "data": image,
+                "label": pseudo_label,
+                "label_name": label_name
             }
         elif self.args.TRAIN.self_supervised_method == "simclr":
             if self.mode == "train":
-                data1 = self.augment_simclr(data)
-                data2 = self.augment_simclr(data)
+                image1 = self.augment_simclr(image)
+                image2 = self.augment_simclr(image)
             elif self.mode == "eval":
-                data1 = self.trans(data)
-                data2 = -1
+                image1 = self.trans(image)
+                image2 = -1
             pseudo_label = -1
             picked_data = {
-                "data": data1,
-                "data2": data2,
+                "data": image1,
+                "data2": image2,
                 "label": pseudo_label,
             }
         else:
@@ -168,7 +172,7 @@ class Cifar10(data.Dataset):
 
         # print(self.dataset["meta_data"], label)
         other_data = {"real_label": label,
-                      "label_name": self.dataset["meta_data"]["label_names"][label]}
+                      "label_name": label_code}
         picked_data.update(other_data)
 
         return picked_data

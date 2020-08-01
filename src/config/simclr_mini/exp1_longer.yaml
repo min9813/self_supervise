@@ -1,15 +1,28 @@
 DATA:
-  batch_size: 1024
+  dataset: miniimagenet
+  batch_size: 312
   cifar_root_dir: /home/min9813/project/data/cifar-10-batches-py
   cifar_meta_file: batches.meta
   cifar_train_reg_exp: data_batch*[1|2|3|4|5]
   cifar_val_reg_exp: test_batch
   cifar_test_reg_exp: test_batch
 
+  data_root_dir: /home/min9813/project/data/mini-imagenet
+  data_train_reg_exp: processed_images/train/*/*
+  data_val_reg_exp: processed_images/val/*/*
+  data_test_reg_exp: processed_images/test/*/*
+
+  class_json_files:
+    train: class_info_train.json
+    test: class_info_test.json
+    val: class_info_val.json
+
+  image_size: 84
+
   feature_root_dir: /home/min9813/project/data/cifar_feature/
 
 TRAIN:
-  total_epoch: 500
+  total_epoch: 100
   start_epoch: 1
   fp16: True
   self_supervised_method: simclr
@@ -33,7 +46,7 @@ OPTIM:
 
 LOG:
   save_dir: ../logs
-  train_print_iter: 10000
+  train_print_iter: 50
 
 MODEL:
   save_dir: ../models
