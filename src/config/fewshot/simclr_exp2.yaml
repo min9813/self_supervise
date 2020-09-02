@@ -61,7 +61,7 @@ MODEL:
   resume: False
   network: resnet18
   # head: [512,256]
-  linear_layers: [512, 256]
+  linear_layers: [512]
   delete_old: True
 
 debug: False

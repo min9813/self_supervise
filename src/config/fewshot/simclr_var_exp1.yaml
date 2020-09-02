@@ -1,6 +1,6 @@
 DATA:
   dataset: miniimagenet
-  batch_size: 312
+  batch_size: 1024
   cifar_root_dir: /home/min9813/project/data/cifar-10-batches-py
   cifar_meta_file: batches.meta
   cifar_train_reg_exp: data_batch*[1|2|3|4|5]
@@ -29,6 +29,8 @@ TRAIN:
   color_aug: True
   shape_aug: True
   logit_scale: 8
+  vae: True
+  prior_agg: False
 
 TEST:
   test_logit_scale: 8
@@ -38,7 +40,7 @@ TEST:
   n_query: 15
   n_support: 5
   few_shot_n_test: 600
-  distance_metric: cossim
+  distance_metric: normal
   mode: few_shot
 
 OPTIM:
@@ -58,10 +60,13 @@ MODEL:
   save_dir: ../models
   resume_net_path: ""  
   resume_opt_path: ""
+  resume_extractor_path: "../models/fewshot/simclr_exp2/best_amp_net.ckpt"
   resume: False
   network: resnet18
   # head: [512,256]
   linear_layers: [512, 256]
+  vae_zdim: 128
+  vae_layers: [512, 256]
   delete_old: True
 
 debug: False

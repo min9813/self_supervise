@@ -18,7 +18,7 @@ def make_directory(path):
         os.makedirs(str(path))
 
 
-def load_model(net, path, logger=None):
+def load_model(net, path, logger=None, freeze=False):
     if logger is None:
         print_ = print
     else:
@@ -34,11 +34,17 @@ def load_model(net, path, logger=None):
     else:
         msg = str(score)
     print_(f"Best score :{score}, iter:{epoch}")
-
+    imp_key = net.load_state_dict(state_dict["net"])
+    print(imp_key)
+    if freeze:
+        logger.info("Freeze next layer:")
+        for name, param in net.named_parameters():
+            logger.info(name)
+            param.requires_grad = False
     return net, epoch+1
 
 
-def save_model(wrapper, optimizer, score, is_best, epoch, logger=None, multi_gpus=False, model_save_dir="../models", delete_old=False):
+def save_model(wrapper, optimizer, score, is_best, epoch, logger=None, multi_gpus=False, model_save_dir="../models", delete_old=False, fp16_train=False, amp=None):
     if logger is None:
         print_ = print
     else:
@@ -47,9 +53,19 @@ def save_model(wrapper, optimizer, score, is_best, epoch, logger=None, multi_gpu
     print_(msg)
     if multi_gpus:
         model = wrapper.module.model.state_dict()
+        # head = wrapper.module.head.state_dict()
+        if hasattr(wrapper.module, "vae"):
+            vae = wrapper.module.vae.state_dict()
+            model = vae
+        head = wrapper.module.head.state_dict()
 
     else:
         model = wrapper.model.state_dict()
+        # head = wrapper.model.state_dict()
+        if hasattr(wrapper, "vae"):
+            vae = wrapper.vae.state_dict()
+            model = vae
+        head = wrapper.head.state_dict()
 
     model_save_dir = model_save_dir
     make_directory(model_save_dir)
@@ -73,10 +89,11 @@ def save_model(wrapper, optimizer, score, is_best, epoch, logger=None, multi_gpu
     save_dict = {
         'iters': epoch,
         'optimizer': optimizer.state_dict(),
+        "head": head
         # 'amp': amp.state_dict()
     }
-    # if args.fp16_train:
-    #     save_dict["amp"] = amp.state_dict()
+    if fp16_train:
+        save_dict["amp"] = amp.state_dict()
     torch.save(
         save_dict,
         save_other_path)

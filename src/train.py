@@ -107,9 +107,8 @@ def train():
     std = [0.229, 0.224, 0.225]
     # trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans(
     #     args.TRAIN.color_aug, args.TRAIN.shape_aug, mean=mean, std=std)
-    trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans_torch(
+    trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans_torch_strong(
         args.TRAIN.color_aug, args.TRAIN.shape_aug, mean=mean, std=std, image_size=args.DATA.image_size)
-
     if args.TRAIN.finetune_linear:
         trn_dataset = dataset.feature_dataset.FeatureDataset(
             "train", args, msglogger)
@@ -175,6 +174,17 @@ def train():
             feature_dim = 2048
         # net = network.test_model.Model()
         # feature_dim = 512
+
+        if args.TRAIN.vae:
+            # vae = network.vae.VAE(feature_dim, args.MODEL.vae_zdim, args.MODEL.vae_layers)
+            vae = network.vae.VariationalModule(feature_dim, args.MODEL.vae_zdim, args.MODEL.vae_layers)
+            msg = "   VAE   "
+            msglogger.info("#"*15+msg + "#"*15)
+            msglogger.info(str(vae))
+            msglogger.info("#"*(30+len(msg)))
+
+            feature_dim = args.MODEL.vae_zdim
+
         if len(args.MODEL.linear_layers):
             head = network.head.MLP(
                 feature_dim, args.num_classes, args.MODEL.linear_layers)
@@ -185,23 +195,43 @@ def train():
         msglogger.info(str(head))
         msglogger.info("#"*(30+len(msg)))
 
-    if args.MODEL.resume:
+    if args.MODEL.resume and not args.TRAIN.vae:
         net, start_epoch = network.model_io.load_model(
             net, args.MODEL.resume_net_path, logger=msglogger)
         args.TRAIN.start_epoch = start_epoch
 
+    if args.TRAIN.vae:
+        net, _ = network.model_io.load_model(
+            net, args.MODEL.resume_extractor_path, logger=msglogger, freeze=args.TRAIN.vae_pretrain_freeze
+        )
+
     if args.TRAIN.self_supervised_method == "simclr" and not args.TRAIN.finetune_linear:
-        criterion = lossfunction.simclr_loss.SimCLRLoss(
+
+        if args.TRAIN.vae:
+            # criterion = lossfunction.simclr_loss.SimCLRLossV(args.DATA.batch_size, device=args.device, feature_dim=args.MODEL.vae_zdim)
+            criterion = lossfunction.simclr_loss.SimCLRLoss(
+                args.DATA.batch_size, scale=args.TRAIN.logit_scale, device=args.device)
+            rec_loss = lossfunction.metric.mseloss
+            if args.TRAIN.prior_agg:
+                kl_loss = lossfunction.kl_div.kl_div_normal_2
+            else:
+                kl_loss = lossfunction.kl_div.kl_div_normal
+        else:
+            criterion = lossfunction.simclr_loss.SimCLRLoss(
             args.DATA.batch_size, scale=args.TRAIN.logit_scale, device=args.device)
     else:
         criterion = nn.CrossEntropyLoss()
+
 
     if args.TRAIN.finetune_linear:
         wrapper = network.wrapper.LossWrapLinear(args, net, criterion)
     else:
         if args.TRAIN.self_supervised_method == "simclr":
-            wrapper = network.wrapper.LossWrapSimCLR(
-                args, net, head, criterion)
+            if args.TRAIN.vae:
+                wrapper = network.wrapper.LossWrapVAE(args, net, vae, head, rec_loss=rec_loss, kl_loss=kl_loss, cont_loss=criterion)
+            else:
+                wrapper = network.wrapper.LossWrapSimCLR(
+                    args, net, head, criterion)
         else:
             wrapper = network.wrapper.LossWrap(args, net, head, criterion)
 
@@ -212,23 +242,42 @@ def train():
     elif args.run_mode == "train":
 
         if args.OPTIM.optimizer == "adam":
-            parameters = [
-                {"params": net.parameters(), "lr": args.OPTIM.lr,
-                 "weight_deacy": 1e-6},
-            ]
+            if args.TRAIN.vae:
+                if args.TRAIN.vae_pretrain_freeze:
+                    parameters = []
+                else:
+                    parameters = [
+                        {"params": net.parameters(), "lr": args.OPTIM.lr,
+                        "weight_deacy": 1e-6},
+                    ]
+                parameters.append(
+                    {"params": vae.parameters(), "lr": args.OPTIM.lr, "weight_decay": 1e-6}
+                )
+            else:
+                parameters = [
+                    {"params": net.parameters(), "lr": args.OPTIM.lr,
+                    "weight_deacy": 1e-6},
+                ]
             if not args.TRAIN.finetune_linear:
                 parameters.append(
                     {"params": head.parameters(), "lr": args.OPTIM.lr,
                      "weight_deacy": 1e-6},
                 )
+
             optimizer = torch.optim.Adam(
                 parameters
             )
         elif args.TRAIN.optimizer == "sgd":
-            parameters = [
-                {"params": net.parameters(), "lr": args.OPTIM.lr,
-                 "weight_deacy": 1e-6, "momentum": 0.9},
-            ]
+            if args.TRAIN.vae:
+                parameters = []
+                parameters.append(
+                    {"params": vae.parameters(), "lr": args.OPTIM.lr, "weight_decay": 1e-6, "momentum": 0.9}
+                )
+            else:
+                parameters = [
+                    {"params": net.parameters(), "lr": args.OPTIM.lr,
+                    "weight_deacy": 1e-6, "momentum": 0.9},
+                ]
             if not args.TRAIN.finetune_linear:
                 parameters.append(
                     {"params": head.parameters(), "lr": args.OPTIM.lr,
@@ -283,8 +332,11 @@ def train():
             val_result = None
             if not args.TRAIN.finetune_linear:
                 # if epoch % args.DATA.feature_save_freq == 0 and epoch > 0:
-                val_result = epoch_func.valid_inference(
-                    wrapper.model, val_loader, epoch, args, logger=val_logger)
+                if args.TRAIN.vae:
+                    val_result = epoch_func.valid_inference_vae(wrapper.model, wrapper.vae, val_loader, epoch, args, logger=val_logger)
+                else:
+                    val_result = epoch_func.valid_inference(
+                        wrapper.model, val_loader, epoch, args, logger=val_logger)
             # val_result = epoch_func.valid_inference(
             #     wrapper.model, train_loader, val_loader, args, val_logger)
             for param_group in optimizer.param_groups:
@@ -337,7 +389,8 @@ def train():
                 best_iter = epoch
             network.model_io.save_model(wrapper, optimizer, val_info, is_best, epoch,
                                         logger=msglogger, multi_gpus=args.multi_gpus,
-                                        model_save_dir=args.MODEL.save_dir, delete_old=args.MODEL.delete_old)
+                                        model_save_dir=args.MODEL.save_dir, delete_old=args.MODEL.delete_old,
+                                        fp16_train=args.TRAIN.fp16, amp=amp)
             if scheduler is not None:
                 if args.OPTIM.lr_scheduler == 'patience':
                     scheduler.step(score)

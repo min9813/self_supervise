@@ -58,6 +58,9 @@ __C.TRAIN.shape_aug = False
 __C.TRAIN.n_way = 5
 __C.TRAIN.n_query = 15
 __C.TRAIN.n_support = 5
+__C.TRAIN.vae = False
+__C.TRAIN.prior_agg = False
+__C.TRAIN.vae_pretrain_freeze = True
 
 __C.TEST.neighbor_k = 200
 __C.TEST.batch_size = 2000
@@ -68,6 +71,7 @@ __C.TEST.n_support = 5
 __C.TEST.few_shot_n_test = 1000
 __C.TEST.distance_metric = "l2euc"
 __C.TEST.mode = "few_show"
+__C.TEST.agg_stats_method = "propose"
 
 __C.OPTIM.optimizer = "adam"
 __C.OPTIM.lr = 1e-4
@@ -89,10 +93,13 @@ __C.MODEL.save_dir = "../models"
 __C.MODEL.delete_old = True
 __C.MODEL.resume_net_path = ""
 __C.MODEL.resume_opt_path = ""
+__C.MODEL.resume_extractor_path = ""
 __C.MODEL.resume = False
 __C.MODEL.network = "resnet18"
 __C.MODEL.head = "1layer"
 __C.MODEL.linear_layers = []
+__C.MODEL.vae_zdim = 128
+__C.MODEL.vae_layers = []
 
 __C.debug = True
 __C.run_mode = "train"

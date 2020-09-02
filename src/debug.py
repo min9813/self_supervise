@@ -31,6 +31,7 @@ from lib.utils.configuration import cfg as args
 from lib.utils.configuration import cfg_from_file, format_dict
 try:
     from apex import amp
+    fp16 = True
 except ImportError:
     fp16 = False
 
@@ -105,8 +106,8 @@ def train():
 
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
-    trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans_torch(
-        args.TRAIN.color_aug, args.TRAIN.shape_aug, mean=mean, std=std)
+    trans, c_aug, s_aug = get_aug_and_trans.get_aug_trans_torch_strong(
+        args.TRAIN.color_aug, args.TRAIN.shape_aug, mean=mean, std=std, image_size=84)
     mean = np.array(mean)[:, None, None]
     std = np.array(std)[:, None, None]
     if args.TRAIN.finetune_linear:
@@ -114,14 +115,22 @@ def train():
             "train", args, msglogger)
 
     else:
-        trn_dataset = dataset.cifar.Cifar10("train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+        if args.DATA.dataset == "cifar10":
+            trn_dataset = dataset.cifar.Cifar10(
+                "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+        elif args.DATA.dataset == "miniimagenet":
+            trn_dataset = dataset.miniimagenet.MiniImageNet(
+                "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+            args.has_same = True
+
 
     train_loader = torch.utils.data.DataLoader(
         trn_dataset, batch_size=1, shuffle=True, num_workers=0, drop_last=True)
 
     save_dir = "./check/simclr"
     make_directory(save_dir)
-    train_loader.dataset.set_eval()
+    # train_loader.dataset.set_eval()
+    images_all = []
     for idx, data in enumerate(train_loader):
         image = data["data"][0]
         image = image * std + mean
@@ -130,16 +139,20 @@ def train():
         # fkldjgsklj
         image = image.transpose(1, 2, 0)
         image = image.astype(np.uint8)
-        # image2 = data["data2"][0]
-        # image2 = image2 * std + mean
-        # image2 = image2.numpy() * 255
-        # image2 = image2.transpose(1, 2, 0)
-        # image2 = image2.astype(np.uint8)
-        # image = np.concatenate((image, image2), axis=1)
-        path = os.path.join(save_dir, "{:0>5}.jpg".format(idx))
-        cv2.imwrite(path, image)
+        # image2 = ["data2"][0]
+        image2 = data["data2"][0]
+        image2 = image2 * std + mean
+        image2 = image2.numpy() * 255
+        image2 = image2.transpose(1, 2, 0)
+        image2 = image2.astype(np.uint8)
+        print(image.shape, image2.shape)
+        image = np.concatenate((image, image2), axis=1)
+        images_all.append(image)
         if idx > 10:
             break
+    image = np.concatenate(images_all, axis=0)
+    path = os.path.join(save_dir, "{:0>5}.jpg".format(idx))
+    cv2.imwrite(path, image)
 
 def debug_fewshot_eval():
     if len(sys.argv) == 2:
@@ -171,5 +184,5 @@ def debug_fewshot_eval():
 
 
 if __name__ == "__main__":
-    # train()
-    debug_fewshot_eval()
+    train()
+    # debug_fewshot_eval()

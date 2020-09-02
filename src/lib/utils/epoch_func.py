@@ -31,6 +31,7 @@ def make_directory(path):
 
 def train_epoch(wrappered_model, train_loader, optimizer, epoch, args, logger=None):
     wrappered_model.train()
+    wrappered_model.model.eval()
     meter = average_meter.AverageMeter()
     train_loader.dataset.set_train()
 
@@ -50,8 +51,24 @@ def train_epoch(wrappered_model, train_loader, optimizer, epoch, args, logger=No
 
         elif args.TRAIN.self_supervised_method == "rotate" or args.TRAIN.finetune_linear:
             pseudo_label = data["label"]
+        elif args.TRAIN.vae:
+            pseudo_label = None
         since = time.time()
-        loss, output = wrappered_model(input_x, pseudo_label)
+        output = wrappered_model(input_x, pseudo_label)
+
+        if len(output) == 2:
+            loss, output = output
+        elif len(output) == 3:
+            kl_loss, cont_loss, output = output
+            loss = kl_loss + cont_loss
+            meter.add_value('kl_loss', kl_loss)
+            meter.add_value('cont_loss', cont_loss)
+        elif len(output) == 4:
+            rec_loss, kl_loss, cont_loss, output = output
+            loss = rec_loss + kl_loss + cont_loss
+            meter.add_value('rec_loss', rec_loss)
+            meter.add_value('kl_loss', kl_loss)
+            meter.add_value('cont_loss', cont_loss)
         meter.add_value("time_f", time.time()-since)
 
         with torch.no_grad():
@@ -125,7 +142,21 @@ def valid_epoch(wrappered_model, train_loader, epoch, args, logger=None):
                 pseudo_label = data["label"]
             since = time.time()
 
-            loss, output = wrappered_model(input_x, pseudo_label)
+            output = wrappered_model(input_x, pseudo_label)
+
+            if len(output) == 2:
+                loss, output = output
+            elif len(output) == 3:
+                kl_loss, cont_loss, output = output
+                loss = kl_loss + cont_loss
+                meter.add_value('kl_loss', kl_loss)
+                meter.add_value('cont_loss', cont_loss)
+            elif len(output) == 4:
+                rec_loss, kl_loss, cont_loss, output = output
+                loss = rec_loss + kl_loss + cont_loss
+                meter.add_value('rec_loss', rec_loss)
+                meter.add_value('kl_loss', kl_loss)
+                meter.add_value('cont_loss', cont_loss)
 
             meter.add_value("time_f", time.time()-since)
             _, pred = torch.max(output, dim=1)
@@ -156,6 +187,45 @@ def valid_epoch(wrappered_model, train_loader, epoch, args, logger=None):
     # inference(wrappered_model.model, infer_data, args, epoch)
 
     return train_info
+
+
+def valid_inference_vae(net, vae, base_loader, epoch, args, val_loader=None, logger=None):
+    base_loader.dataset.set_eval()
+    if val_loader is not None:
+        val_loader.dataset.set_eval()
+    with torch.no_grad():
+        logger.info("Inference data ... ")
+        iter_num = len(base_loader)
+        train_labels = []
+        train_logits = {}
+        # base_loader.drop_last = False
+        for idx, data in tqdm(enumerate(base_loader), total=iter_num, desc="train"):
+            input_x = data["data"]
+            label = data["real_label"]
+            input_x = input_x.cuda()
+            raw_logits = net(input_x)
+            mean_v, sigma_v = vae.encoder(raw_logits)
+            train_labels.append(label)
+            try:
+                train_logits["mean"].append(mean_v.cpu())
+                train_logits["sigma"].append(sigma_v.cpu())
+            except KeyError:
+                train_logits["mean"] = [mean_v.cpu()]
+                train_logits["sigma"] = [sigma_v.cpu()]
+            if args.debug:
+                if idx >= 3:
+                    break
+        
+        train_labels = torch.cat(train_labels)
+        for key, value in train_logits.items():
+            train_logits[key] = torch.cat(value).numpy()
+
+        
+        if args.TEST.distance_metric == "normal":
+            result = few_shot_eval.evaluate_fewshot_vae(train_logits["mean"], train_logits["sigma"], train_labels.numpy(), args)
+        else:
+            result = few_shot_eval.evaluate_fewshot(train_logits["mean"], train_labels.numpy(), args)
+    return result
 
 
 def valid_inference(net, base_loader, epoch, args, val_loader=None, logger=None):

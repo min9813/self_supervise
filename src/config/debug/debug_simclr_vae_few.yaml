@@ -29,6 +29,7 @@ TRAIN:
   color_aug: True
   shape_aug: True
   logit_scale: 8
+  vae: True
 
 TEST:
   test_logit_scale: 8
@@ -38,7 +39,7 @@ TEST:
   n_query: 15
   n_support: 5
   few_shot_n_test: 600
-  distance_metric: cossim
+  distance_metric: normal
   mode: few_shot
 
 OPTIM:
@@ -58,13 +59,16 @@ MODEL:
   save_dir: ../models
   resume_net_path: ""  
   resume_opt_path: ""
+  resume_extractor_path: "../models/fewshot/simclr_exp2/best_amp_net.ckpt"
   resume: False
   network: resnet18
   # head: [512,256]
   linear_layers: [512, 256]
+  vae_zdim: 128
+  vae_layers: [512, 256]
   delete_old: True
 
-debug: False
+debug: True
 run_mode: train
 seed: 1234
 gpus: "0"

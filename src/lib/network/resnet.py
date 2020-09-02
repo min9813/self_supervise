@@ -244,7 +244,7 @@ def resnet50(pretrained=False, progress=True, **kwargs):
 
 
 if __name__ == "__main__":
-    net = resnet50().eval()
+    net = resnet18().eval()
     with torch.no_grad():
         x = torch.randn(1, 3, 32, 32)
         out = net(x)

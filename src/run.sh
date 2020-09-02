@@ -18,12 +18,12 @@
 # python train.py config/simclr_train/exp1.yaml
 # python train.py config/simclr_train/exp2.yaml
 
-python train.py config/simclr_train/exp1_longer.yaml
-python train.py config/simclr_train/exp1_longer_small.yaml
+# python train.py config/simclr_train/exp1_longer.yaml
+# python train.py config/simclr_train/exp1_longer_small.yaml
 # python train.py config/simclr_train/exp1_longer_large_scale.yaml
 # python train.py config/simclr_train/exp1_longer_scheduler.yaml
-python train.py config/simclr_train/exp2_longer.yaml
-python train.py config/simclr_train/exp2_longer_small.yaml
+# python train.py config/simclr_train/exp2_longer.yaml
+# python train.py config/simclr_train/exp2_longer_small.yaml
 # python train.py config/simclr_train/exp2_longer_scheduler.yaml
 
 # python train.py config/simclr_train/exp1_longer_scale.yaml
@@ -62,3 +62,14 @@ python train.py config/simclr_train/exp2_longer_small.yaml
 # python train.py config/simclr_linear/linear2_60.yaml
 # python train.py config/simclr_linear/linear2_80.yaml
 # python train.py config/simclr_linear/linear2_100.yaml
+
+
+# python train.py config/fewshot/simclr_exp1.yaml
+# python train.py config/fewshot/simclr_exp2.yaml
+# python train.py config/fewshot/simclr_vae_exp1_longer.yaml
+# python train.py config/fewshot/simclr_vae_exp2_longer.yaml
+# python train.py config/fewshot/simclr_var_exp1.yaml
+# python train.py config/fewshot/simclr_var_exp1_shallow.yaml
+# python train.py config/fewshot/simclr_var_exp1_shallow_l2.yaml
+python train.py config/fewshot/simclr_var_exp1_shallow_mah.yaml
+# python train.py config/fewshot/simclr_var_exp2.yaml
