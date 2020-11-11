@@ -53,6 +53,45 @@ def calc_mahalanobis_naive(features1, features2, sigma):
     return dist_mat
 
 
+def calc_cossim_dist_numpy(feature1, feature2):
+    feature1 = feature1 / \
+        np.sqrt(np.sum(feature1 * feature1, axis=1, keepdims=True))
+    feature2 = feature2 / \
+        np.sqrt(np.sum(feature2 * feature2, axis=1, keepdims=True))
+    distance_mat = np.dot(feature1, feature2.T)
+    return distance_mat
+
+
+def calc_l2_dist_numpy(feature1, feature2):
+    # (Qn, D), (Sn, D)
+    XX = np.sum(feature1*feature1, axis=1, keepdims=True)
+    XY = np.dot(feature1, feature2.T)
+    YY = np.sum(feature2*feature2, axis=1, keepdims=True).T
+    # print(XX.shape, XY.shape, YY.shape, feature1.shape)
+
+    dist = XX - 2 * XY + YY
+    dist = np.sqrt(dist)
+
+    return -dist
+
+
+def calc_l2_dist_torch(feature1, feature2, dim=1):
+    XX = torch.sum(feature1*feature1, axis=dim, keepdims=True)
+    if dim == 1:
+        XY = torch.mm(feature1, feature2.T)
+        YY = torch.sum(feature2*feature2, axis=dim, keepdims=True).T
+    else:
+        XY = torch.bmm(feature1, feature2.permute(0, 2, 1))
+        YY = torch.sum(feature2*feature2, axis=dim, keepdims=True).permute(0, 2, 1)
+    # print(XX.shape, XY.shape, YY.shape, feature1.shape)
+
+    dist = XX - 2 * XY + YY
+    dist = torch.sqrt(dist)
+    print(dist.shape)
+    
+    return -dist
+
+
 if __name__ == "__main__":
     x = np.array([[1, 2.], [1, 0.]])
     y = np.array([[1, 4], [0, 1.], [2, 2]])

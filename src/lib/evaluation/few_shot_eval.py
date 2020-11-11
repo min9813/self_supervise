@@ -72,14 +72,15 @@ def evaluate_fewshot(features, labels, args):
         support_mean_feats_all = np.array(support_mean_feats_all)
         support_one_feats = np.array(support_one_feats)
 
-        result_n = calc_accuracy(query_feats_all, query_labels_all,
-                                 support_mean_feats_all, sampled_class, args, args.TEST.n_support)
-        for key, value in result_n.items():
-            meter.add_value(key, value)
-        result_one = calc_accuracy(
-            query_feats_all, query_labels_all, support_one_feats, sampled_class, args, num_s=1)
-        for key, value in result_one.items():
-            meter.add_value(key, value)
+        for method in ("cossim", "l2euc"):
+            result_n = calc_accuracy(query_feats_all, query_labels_all,
+                                     support_mean_feats_all, sampled_class, args, args.TEST.n_support, distance_metric=method)
+            for key, value in result_n.items():
+                meter.add_value("{}_{}".format(key, method), value)
+            result_one = calc_accuracy(
+                query_feats_all, query_labels_all, support_one_feats, sampled_class, args, num_s=1, distance_metric=method)
+            for key, value in result_one.items():
+                meter.add_value("{}_{}".format(key, method), value)
 
     val_info = meter.get_summary()
 
@@ -159,12 +160,13 @@ def evaluate_fewshot_vae(z_mean, z_sigma, labels, args):
         support_one_feats_m = np.array(support_one_feats_m)
         support_one_feats_s = np.array(support_one_feats_s)
 
-        result_n = calc_accuracy((query_feats_all_m, query_feats_all_s), query_labels_all,
-                                 (support_mean_feats_all_m,
-                                  support_mean_feats_all_s),
-                                 sampled_class, args, args.TEST.n_support)
-        for key, value in result_n.items():
-            meter.add_value(key, value)
+        for method in ("cossim", "l2euc", "normal"):
+            result_n = calc_accuracy((query_feats_all_m, query_feats_all_s), query_labels_all,
+                                     (support_mean_feats_all_m,
+                                      support_mean_feats_all_s),
+                                     sampled_class, args, args.TEST.n_support)
+            for key, value in result_n.items():
+                meter.add_value("{}_{}".format(key, method), value)
         result_one = calc_accuracy(
             (query_feats_all_m, query_feats_all_s), query_labels_all,
             (support_one_feats_m, support_one_feats_s), sampled_class,
@@ -220,26 +222,37 @@ def calc_normal_prob(query_feats_all, support_feats_all):
     # dist = (Q_n, S_n)
     # print(coefed_sfeats_m.shape, query_feats_m.shape, support_feats_m.shape, support_feats_s.shape)
     # dist = calc_l2_dist(query_feats_m, coefed_sfeats_m)
-    dist = metric.calc_mahalanobis_numpy(query_feats_m, support_feats_m, support_feats_s)
+    dist = metric.calc_mahalanobis_numpy(
+        query_feats_m, support_feats_m, support_feats_s)
 
     # log coef = (S_n, 1)
-    log_coef = -0.5 * np.log(support_feats_s).sum(axis=1, keepdims=True)
+    log_coef = 0.5 * np.log(support_feats_s).sum(axis=1, keepdims=True)
 
     # N(m, s) = 1 / (2pi)^k sqrt(det(s)) exp(- (x-m)^T s^-1 (x-m))
-    dist = dist + log_coef.T
+    dist = - dist + log_coef.T
 
     return dist
 
 
-def calc_accuracy(query_feats_all, query_labels_all, support_feats, support_class, args, num_s):
+def calc_accuracy(query_feats_all, query_labels_all, support_feats_all, support_class, args, num_s, distance_metric="cossim"):
     result = {}
-    if args.TEST.distance_metric == "cossim":
-        distance_mat = calc_cossim_dist(query_feats_all, support_feats)
-    elif args.TEST.distance_metric == "l2euc":
-        distance_mat = calc_l2_dist(query_feats_all, support_feats)
-    elif args.TEST.distance_metric == "normal":
+    if distance_metric == "cossim":
+        if isinstance(query_feats_all, tuple):
+            query_feats_m, query_feats_s = query_feats_all
+            support_feats_m, support_feats_s = support_feats_all
+            distance_mat = calc_cossim_dist(query_feats_m, support_feats_m)
+        else:
+            distance_mat = calc_cossim_dist(query_feats_all, support_feats_all)
+    elif distance_metric == "l2euc":
+        if isinstance(query_feats_all, tuple):
+            query_feats_m, query_feats_s = query_feats_all
+            support_feats_m, support_feats_s = support_feats_all
+            distance_mat = calc_l2_dist(query_feats_m, support_feats_m)
+        else:
+            distance_mat = calc_l2_dist(query_feats_all, support_feats_all)
+    elif distance_metric == "normal":
         assert len(query_feats_all) == 2
-        distance_mat = calc_normal_prob(query_feats_all, support_feats)
+        distance_mat = calc_normal_prob(query_feats_all, support_feats_all)
     pred_label_index = np.argmax(distance_mat, axis=1)
     pred_label = support_class[pred_label_index]
     mean_acc = np.mean(pred_label == query_labels_all)

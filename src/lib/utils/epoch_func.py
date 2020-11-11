@@ -31,8 +31,14 @@ def make_directory(path):
 
 def train_epoch(wrappered_model, train_loader, optimizer, epoch, args, logger=None):
     wrappered_model.train()
-    wrappered_model.model.eval()
+    if args.TRAIN.vae:
+        wrappered_model.model.eval()        
+    else:
+        wrappered_model.model.train()
+
     meter = average_meter.AverageMeter()
+        # train_loader.dataset.set_eval()
+    # else:
     train_loader.dataset.set_train()
 
     iter_num = len(train_loader)
@@ -51,18 +57,24 @@ def train_epoch(wrappered_model, train_loader, optimizer, epoch, args, logger=No
 
         elif args.TRAIN.self_supervised_method == "rotate" or args.TRAIN.finetune_linear:
             pseudo_label = data["label"]
-        elif args.TRAIN.vae:
+        elif args.TRAIN.vae and not args.TRAIN.startswith("supervise"):
             pseudo_label = None
+        elif args.TRAIN.self_supervised_method.startswith("supervise"):
+            pseudo_label = data["label"]
         since = time.time()
         output = wrappered_model(input_x, pseudo_label)
 
         if len(output) == 2:
             loss, output = output
         elif len(output) == 3:
-            kl_loss, cont_loss, output = output
-            loss = kl_loss + cont_loss
-            meter.add_value('kl_loss', kl_loss)
-            meter.add_value('cont_loss', cont_loss)
+            if args.DATA.is_episode:
+                loss, output, meta_label = output
+                pseudo_label = meta_label.cpu()
+            else:
+                kl_loss, cont_loss, output = output
+                loss = kl_loss + cont_loss
+                meter.add_value('kl_loss', kl_loss)
+                meter.add_value('cont_loss', cont_loss)
         elif len(output) == 4:
             rec_loss, kl_loss, cont_loss, output = output
             loss = rec_loss + kl_loss + cont_loss
@@ -120,7 +132,10 @@ def valid_epoch(wrappered_model, train_loader, epoch, args, logger=None):
     wrappered_model.eval()
 
     meter = average_meter.AverageMeter()
-    train_loader.dataset.set_train()
+    if args.TRAIN.self_supervised_method.startswith("supervise"):
+        train_loader.dataset.set_eval()
+    else:
+        train_loader.dataset.set_train()
     iter_num = len(train_loader)
     iter_since = time.time()
     since = iter_since
@@ -139,6 +154,10 @@ def valid_epoch(wrappered_model, train_loader, epoch, args, logger=None):
                     input_x, data["data2"])
 
             elif args.TRAIN.self_supervised_method == "rotate" or args.TRAIN.finetune_linear:
+                pseudo_label = data["label"]
+            elif args.TRAIN.vae and not args.TRAIN.startswith("supervise"):
+                pseudo_label = None
+            elif args.TRAIN.self_supervised_method.startswith("supervise"):
                 pseudo_label = data["label"]
             since = time.time()
 
@@ -220,8 +239,7 @@ def valid_inference_vae(net, vae, base_loader, epoch, args, val_loader=None, log
         for key, value in train_logits.items():
             train_logits[key] = torch.cat(value).numpy()
 
-        
-        if args.TEST.distance_metric == "normal":
+        if args.TRAIN.vae:
             result = few_shot_eval.evaluate_fewshot_vae(train_logits["mean"], train_logits["sigma"], train_labels.numpy(), args)
         else:
             result = few_shot_eval.evaluate_fewshot(train_logits["mean"], train_labels.numpy(), args)

@@ -71,5 +71,16 @@
 # python train.py config/fewshot/simclr_var_exp1.yaml
 # python train.py config/fewshot/simclr_var_exp1_shallow.yaml
 # python train.py config/fewshot/simclr_var_exp1_shallow_l2.yaml
-python train.py config/fewshot/simclr_var_exp1_shallow_mah.yaml
+# python train.py config/fewshot/simclr_var_exp1_shallow_mah.yaml
 # python train.py config/fewshot/simclr_var_exp2.yaml
+# python train.py config/fewshot/simclr_var_exp2_shallow.yaml
+# python train.py config/fewshot/simclr_var_exp2_shallow_l2.yaml
+# python train.py config/fewshot/simclr_var_exp2_shallow_mah.yaml
+
+# python train.py config/fewshot/supervise_cossim_no_aug.yaml
+# python train.py config/fewshot/supervise_innerprod_no_aug.yaml
+
+# python train.py config/fewshot/supervise_cossim_no_aug.yaml
+python train.py config/fewshot/supervise_cossim_scale16.yaml
+python train.py config/fewshot/supervise_cossim_scale24.yaml
+python train.py config/fewshot/simclr_exp1_scale16.yaml

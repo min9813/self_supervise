@@ -13,6 +13,7 @@ import logging
 import numpy as np
 import torch.utils.data as data
 import cv2
+import torch
 from tqdm import tqdm
 from torchvision.transforms import transforms
 from PIL import Image
@@ -48,6 +49,7 @@ class MiniImageNet(data.Dataset):
         self.logger.info(f"setup cifar {split} ==>")
         data = self.setup_data()
         self.class_num = len(data["meta_data"])
+        self.class_list = list(data["data"].keys())
         self.dataset = data
 
     def setup_data(self):
@@ -82,7 +84,7 @@ class MiniImageNet(data.Dataset):
             path_list = pathlib.Path(self.args.DATA.data_root_dir).glob(
                 self.args.DATA.data_test_reg_exp)
         
-        all_data = []
+        all_data = collections.defaultdict(list)
         for path in tqdm(path_list, total=len(class_info)*600):
             image = cv2.imread(str(path))
             h, w, c = image.shape
@@ -97,7 +99,7 @@ class MiniImageNet(data.Dataset):
                 "label": label,
                 "label_code": class_name
             }
-            all_data.append(data)
+            all_data[label].append(data)
 
         self.logger.info("pick up {} class num = {}, data num = {}".format(
             self.split, len(class_info), len(all_data)))
@@ -110,7 +112,7 @@ class MiniImageNet(data.Dataset):
         return data_data
 
     def __len__(self):
-        return len(self.dataset["data"])
+        return self.args.TRAIN.eval_freq * self.args.DATA.batch_size
 
     def augment_simclr(self, data):
         if self.c_aug is not None:
@@ -139,57 +141,69 @@ class MiniImageNet(data.Dataset):
     def set_train(self):
         self.mode = "train"
 
-    def pickup(self, index):
-        data = self.dataset["data"][index]
-        image = data["image"]
-        label = data["label"]
-        label_code = data["label_code"]
-        label_name = self.class_info[label_code]
-
+    def pickup_one_sample(self, image):
         if self.args.TRAIN.self_supervised_method == "rotate":
-            rotate_num = np.random.randint(4)
-            for i in range(rotate_num):
-                image = np.rot90(image).copy()
+            raise NotImplementedError
+            # rotate_num = np.random.randint(4)
+            # for i in range(rotate_num):
+            #     image = np.rot90(image).copy()
 
-            if self.trans is not None:
-                image = self.trans(image)
-            pseudo_label = rotate_num
-            picked_data = {
-                "data": image,
-                "label": pseudo_label,
-                "label_name": label_name
-            }
+            # if self.trans is not None:
+            #     image = self.trans(image)
+            # pseudo_label = rotate_num
+            # picked_data = {
+            #     "data": image,
+            #     "label": pseudo_label,
+            #     "label_name": label_name
+            # }
         elif self.args.TRAIN.self_supervised_method == "simclr":
-            if self.mode == "train":
-                image1 = self.augment_simclr(image)
-                image2 = self.augment_simclr(image)
-            elif self.mode == "eval":
-                image1 = self.trans(image)
-                image2 = -1
-            pseudo_label = -1
-            picked_data = {
-                "data": image1,
-                "data2": image2,
-                "label": pseudo_label,
-            }
+            raise NotImplementedError
+            # if self.mode == "train":
+            #     image1 = self.augment_simclr(image)
+            #     image2 = self.augment_simclr(image)
+            # elif self.mode == "eval":
+            #     image1 = self.trans(image)
+            #     image2 = -1
+            # pseudo_label = -1
+            # picked_data = {
+            #     "data": image1,
+            #     "data2": image2,
+            #     "label": pseudo_label,
+            # }
         elif self.args.TRAIN.self_supervised_method.startswith("supervise"):
             if self.mode == "train":
                 image1 = self.augment_simclr(image)
             elif self.mode == "eval":
                 image1 = self.trans(image)
-            picked_data = {
-                "data": image1,
-                "label": label
-            }
+            image = image1
+
         else:
             raise NotImplementedError
 
-        # print(self.dataset["meta_data"], label)
-        other_data = {"real_label": label,
-                      "label_name": label_code}
-        picked_data.update(other_data)
+        return image
 
-        return picked_data
+    def pickup(self, index):
+        pick_class_labels = np.random.choice(self.class_list, self.args.DATA.n_class_train, replace=False)
+
+        input_data = []
+        labels = []
+        real_names = []
+        for class_label in pick_class_labels:
+            sample_num_per_class = np.arange(len(self.dataset["data"][class_label]))
+            pick_indices = np.random.choice(sample_num_per_class, self.args.DATA.nb_sample_per_class, replace=False)
+            for index in pick_indices:
+                pick_data = self.dataset["data"][class_label][index]
+                image = self.pickup_one_sample(pick_data["image"])
+                input_data.append(image)
+                real_names.append(self.class_info[pick_data["label_code"]])
+            labels.extend([class_label]*self.args.DATA.nb_sample_per_class)
+
+        labels = np.array(labels)
+        input_data = torch.stack(input_data, dim=0)
+
+        data = {"label": labels, "data": input_data, "label_name": real_names}
+
+        return data
 
     def __getitem__(self, index):
         picked_data = self.pickup(index)

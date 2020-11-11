@@ -38,6 +38,10 @@ __C.DATA.data_root_dir = ""
 __C.DATA.data_train_reg_exp = ""
 __C.DATA.data_val_reg_exp = ""
 __C.DATA.data_test_reg_exp = ""
+__C.DATA.is_episode = False
+__C.DATA.nb_sample_per_class = 10
+__C.DATA.n_support = 5
+__C.DATA.n_class_train = 20
 __C.DATA.class_json_files = {
     "train": "",
     "val": "",
@@ -47,6 +51,7 @@ __C.DATA.class_json_files = {
 __C.DATA.image_size = 84
 
 __C.TRAIN.total_epoch = 100
+__C.TRAIN.eval_freq = 100
 __C.TRAIN.start_epoch = 1
 __C.TRAIN.self_supervised_method = "rotate"
 __C.TRAIN.fp16 = False
@@ -61,6 +66,7 @@ __C.TRAIN.n_support = 5
 __C.TRAIN.vae = False
 __C.TRAIN.prior_agg = False
 __C.TRAIN.vae_pretrain_freeze = True
+__C.TRAIN.meta_mode = "cossim"
 
 __C.TEST.neighbor_k = 200
 __C.TEST.batch_size = 2000
@@ -112,6 +118,9 @@ __C.num_workers = 4
 __C.num_classes = 4
 __C.input_ch = 3
 
+
+def check_parameters(cfg):
+    assert cfg.TRAIN.self_supervised_method in ("simclr", "rotate", "supervise_cossim", "supervise_innerprod"), cfg.TRAIN.self_supervised_method
 
 def format_dict(cfg):
     ng_names = []

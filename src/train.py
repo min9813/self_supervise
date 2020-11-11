@@ -27,7 +27,7 @@ import lib.utils.get_aug_and_trans as get_aug_and_trans
 import lib.network as network
 from torch.optim import lr_scheduler
 from lib.utils.configuration import cfg as args
-from lib.utils.configuration import cfg_from_file, format_dict
+from lib.utils.configuration import cfg_from_file, format_dict, check_parameters
 try:
     from apex import amp
     fp16 = True
@@ -53,6 +53,8 @@ def train():
         cfg_from_file(cfg_file)
     else:
         cfg_file = "default"
+
+    check_parameters(args)
 
     if len(args.gpus.split(',')) > 1 and args.use_multi_gpu:
         multi_gpus = True
@@ -188,6 +190,10 @@ def train():
         if len(args.MODEL.linear_layers):
             head = network.head.MLP(
                 feature_dim, args.num_classes, args.MODEL.linear_layers)
+        elif args.TRAIN.self_supervised_method == "supervise_cossim":
+            head = network.cosinehead.CosineMarginProduct(
+                in_feature=feature_dim, out_feature=args.num_classes, s=args.TRAIN.logit_scale
+            )
         else:
             head = network.head.Head(feature_dim, args.num_classes)
         msg = "   HEAD   "
@@ -356,7 +362,7 @@ def train():
                 for name, value in val_result.items():
                     val_msg += "{}:{:.4f} ".format(name, value)
             elif args.TEST.mode == "few_shot":
-                score = val_result["mean_acc_{}".format(args.TEST.n_support)]
+                score = val_result["mean_acc_{}_cossim".format(args.TEST.n_support)]
                 val_msg = "Test: "
                 for name, value in val_result.items():
                     if name.startswith("mean"):
