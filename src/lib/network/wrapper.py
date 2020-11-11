@@ -86,7 +86,7 @@ class LossWrapEpisode(LossWrap):
         support_feats = F.normalize(support_feats, dim=2)
         # print(query_feats.size(), support_feats.size())
         cossim = torch.bmm(query_feats, support_feats.permute(0, 2, 1))
-        assert cossim.max() <= 1.001, cossim.max()
+        # assert cossim.max() <= 1.001, cossim.max()
         cossim = cossim * self.args.TRAIN.logit_scale
         cossim = cossim.reshape(-1, self.args.DATA.n_class_train)
 
