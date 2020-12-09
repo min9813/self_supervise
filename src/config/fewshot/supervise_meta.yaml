@@ -28,11 +28,11 @@ DATA:
 TRAIN:
   total_epoch: 300
   start_epoch: 1
-  eval_freq: 100
+  eval_freq: 200
   fp16: True
   self_supervised_method: supervise_cossim
-  color_aug: False
-  shape_aug: False
+  color_aug: True
+  shape_aug: True
   logit_scale: 8
   vae: False
 
@@ -73,7 +73,7 @@ MODEL:
   vae_layers: [512, 256]
   delete_old: True
 
-debug: True
+debug: False
 run_mode: train
 seed: 1234
 gpus: "0"

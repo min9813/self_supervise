@@ -37,6 +37,18 @@ class LossWrapEpisode(LossWrap):
 
     def forward(self, input, label):
         # input = (B, n_class*n_sample, C, W, H)
+        if self.training:
+            self.n_way = self.args.TRAIN.n_way
+            n_support = self.args.TRAIN.n_support
+            n_query = self.args.TRAIN.n_query
+            n_sample = n_support + n_query
+        else:
+            self.n_way = self.args.TEST.n_way
+            n_support = self.args.TEST.n_support
+            n_query = self.args.TEST.n_query
+            n_sample = n_support + n_query
+
+
         B, CXN, C, W, H = input.size()
         input = input.reshape(-1, C, W, H)
         if self.args.multi_gpus:
@@ -45,41 +57,60 @@ class LossWrapEpisode(LossWrap):
             input, label = input.to(
                 self.args.device), label.to(self.args.device)
 
-        # shuffle_index = torch.randperm(B*CXN, device=input.device)
-        # shuffled_input = input[shuffle_index]
-        # raw_logits = self.model(shuffled_input)
-        raw_logits = self.model(input)
-        # raw_logits[shuffle_index] = raw_logits
+        shuffle_index = torch.randperm(B*CXN, device=input.device)
+        shuffled_input = input[shuffle_index]
+        raw_logits = self.model(shuffled_input)
+        # raw_logits = self.model(input)
+        # raw_logits = raw_logits[shuffle_index]
+        raw_logits[shuffle_index] = raw_logits.clone()
         raw_logits = raw_logits.reshape(
-            B, self.args.DATA.n_class_train, self.args.DATA.nb_sample_per_class, -1)
+            B, self.n_way, n_sample, -1)
 
-        support_feats = raw_logits[:, :, :self.args.DATA.n_support]
+        support_feats = raw_logits[:, :, :n_support]
 
-        support_feats = torch.mean(raw_logits, dim=2)  # (B, n_class, feat_dim)
+        support_feats = torch.mean(support_feats, dim=2)  # (B, n_class, feat_dim)
 
-        n_query = self.args.DATA.nb_sample_per_class - self.args.DATA.n_support
-        query_feats = raw_logits[:, :, self.args.DATA.n_support:]
+        query_feats = raw_logits[:, :, n_support:]
         query_feats = query_feats.reshape(
-            B, self.args.DATA.n_class_train*n_query, -1)
-        label_episode = torch.arange(self.args.DATA.n_class_train,
+            B, self.n_way*n_query, -1)
+        label_episode = torch.arange(self.n_way,
                                      dtype=torch.long, device=query_feats.device)
         label_episode = label_episode.view(-1,
-                                           1).repeat(B, n_query).reshape(-1)
-
+                                           1)
+        label_episode = label_episode.repeat(B, n_query).reshape(-1)
+        # label_episode_for_eval = label_episode.repeat(B, n_query).reshape(-1)
+        # label_episode_for_output = label_episode.repeat(B, n_sample, )
+        # if not self.training:
+        #     print(label_episode)
+        # # print(label)
+        # # print(label_episode)
+        # # print(label)
+        #     label = label.reshape(B,  self.n_way, n_sample) 
+        # # # print(label)
+        #     query_label = label[:, :, n_support:]
+        #     query_label = query_label.reshape(B, self.n_way*n_query, -1).reshape(-1)
+        #     print(query_label)
+        #     sdfa
         if self.args.TRAIN.meta_mode == "cossim":
             logit = self.compute_cosine_similarity(support_feats, query_feats)
         elif self.args.TRAIN.meta_mode == "euc":
             logit = metric.calc_l2_dist_torch(
                 query_feats, support_feats, dim=2
             )
-            logit = logit.reshape(-1, self.args.DATA.n_class_train)
-            print(logit)
+            # logit = logit.permute(0, 2, 1)
+            logit = logit.reshape(-1, self.n_way)
         else:
             raise NotImplementedError
 
         loss = self.criterion(logit, label_episode)
+        # loss = self.criterion(logit, label_episode_for_eval)
+        # log_p_y = F.log_softmax(logit, dim=1).view(B*n_way, n_query, -1)
+        # loss_2 = -log_p_y.gather(2, label_episode.reshape(B*n_way, n_query, 1)).mean()
+        # print(label_episode)
+        # print(label)
+        # sdfa
 
-        return loss, logit, label_episode
+        return loss, logit, label_episode, raw_logits
 
     def compute_cosine_similarity(self, support_feats, query_feats):
         query_feats = F.normalize(query_feats, dim=2)
@@ -88,7 +119,10 @@ class LossWrapEpisode(LossWrap):
         cossim = torch.bmm(query_feats, support_feats.permute(0, 2, 1))
         # assert cossim.max() <= 1.001, cossim.max()
         cossim = cossim * self.args.TRAIN.logit_scale
-        cossim = cossim.reshape(-1, self.args.DATA.n_class_train)
+        # order in one batch = (C1, C1, C1, ..., C2, C2, C2, ...)
+        # cossim = cossim.permute(0, 2, 1)
+        # print(cossim.shape, query_feats.shape)
+        cossim = cossim.reshape(-1, self.n_way)
 
         return cossim
 
@@ -339,6 +373,7 @@ def debug_simclr_vae():
                        kl_div_normal_2, simclr_loss)
     # label = torch.arange(data_b)
     _, a, b = wrap(x, label)
+    b.backward()
     print(a)
     print(b)
 
@@ -346,11 +381,13 @@ def debug_meta():
     class R:
 
         def __init__(self):
-            self.nb_sample_per_class = 10
-            self.n_class_train = 5
+            # self.n = 10
+            self.n_way = 5
             self.n_support = 5
-            self.logit_scale = 1
-            self.meta_mode = "euc"
+            self.n_query = 5
+            self.logit_scale = 8
+            # self.meta_mode = "euc"
+            self.meta_mode = "cossim"
 
     class T:
         def __init__(self):
@@ -359,6 +396,7 @@ def debug_meta():
             # self.TRAIN = R()
             self.DATA = R()
             self.TRAIN = R()
+            self.TEST = R()
 
 
     args = T()
@@ -374,9 +412,9 @@ def debug_meta():
     fd = 64
     model = resnet18().eval()
     x = torch.randn(1, 3, 84, 84)
-    x = torch.cat([x for i in range(args.DATA.nb_sample_per_class)])
+    x = torch.cat([x for i in range(args.TRAIN.n_support+args.TRAIN.n_query)])
     print(x.size())
-    x = [x+i for i in range(5)]
+    x = [x+i for i in range(args.TRAIN.n_way)]
     x = torch.cat(x, dim=0)
     # y = torch.randn_like(x)
     x = torch.stack((x, x), dim=0)
@@ -384,15 +422,18 @@ def debug_meta():
     label = torch.arange(len(x))
     label = torch.cat((label+len(label), label))
     criterion = nn.CrossEntropyLoss()
-    wrap = LossWrapEpisode(args, model, None, criterion)
+    wrap = LossWrapEpisode(args, model, None, criterion).eval()
 
     loss, output, b = wrap(x, label)
     with torch.no_grad():
         _, pred = torch.max(output, dim=1)
         correct = np.mean(pred.cpu().numpy() == b.numpy())
         print(correct)
+    # loss.backward()
+    # print(model.conv1.weight.grad)
 
-    print(loss)
+    # print(loss, loss_2)
+    # print(output)
     print(b)
 
 

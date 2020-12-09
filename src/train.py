@@ -123,11 +123,23 @@ def train():
                 "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
             val_dataset = dataset.cifar.Cifar10(
                 "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+            valid_batch_size = args.DATA.batch_size
+
         elif args.DATA.dataset == "miniimagenet":
-            trn_dataset = dataset.miniimagenet.MiniImageNet(
-                "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
-            val_dataset = dataset.miniimagenet.MiniImageNet(
-                "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+            if args.DATA.is_episode:
+                trn_dataset = dataset.miniimagenet_episode.MiniImageNet(
+                    "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+                # valid_batch_size = args.TRAIN.n_way * \
+                    # (args.TRAIN.n_support + args.TRAIN.n_query) * args.DATA.batch_size
+                valid_batch_size = args.TRAIN.n_way // args.TEST.n_way
+                val_dataset = dataset.miniimagenet_episode.MiniImageNet(
+                    "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+            else:
+                trn_dataset = dataset.miniimagenet.MiniImageNet(
+                    "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+                valid_batch_size = args.DATA.batch_size
+                val_dataset = dataset.miniimagenet.MiniImageNet(
+                    "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
             args.has_same = True
 
     train_loader = torch.utils.data.DataLoader(
@@ -136,12 +148,12 @@ def train():
     #     print(data["data"].size())
     # dsklfal
     # memory_loader = torch.utils.data.DataLoader(
-        # trn_dataset, batch_size=args.DATA.batch_size, shuffle=False, num_workers=args.num_workers, drop_last=False)
+    # trn_dataset, batch_size=args.DATA.batch_size, shuffle=False, num_workers=args.num_workers, drop_last=False)
 
     #     print(data["data"].size())
     # fkldsj
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=args.DATA.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=False)
+        val_dataset, batch_size=valid_batch_size, shuffle=True, num_workers=args.num_workers, drop_last=False)
 
     # for data in val_loader:
     #     print(data["data"].size())
@@ -179,7 +191,8 @@ def train():
 
         if args.TRAIN.vae:
             # vae = network.vae.VAE(feature_dim, args.MODEL.vae_zdim, args.MODEL.vae_layers)
-            vae = network.vae.VariationalModule(feature_dim, args.MODEL.vae_zdim, args.MODEL.vae_layers)
+            vae = network.vae.VariationalModule(
+                feature_dim, args.MODEL.vae_zdim, args.MODEL.vae_layers)
             msg = "   VAE   "
             msglogger.info("#"*15+msg + "#"*15)
             msglogger.info(str(vae))
@@ -224,22 +237,26 @@ def train():
                 kl_loss = lossfunction.kl_div.kl_div_normal
         else:
             criterion = lossfunction.simclr_loss.SimCLRLoss(
-            args.DATA.batch_size, scale=args.TRAIN.logit_scale, device=args.device)
+                args.DATA.batch_size, scale=args.TRAIN.logit_scale, device=args.device)
     else:
         criterion = nn.CrossEntropyLoss()
-
 
     if args.TRAIN.finetune_linear:
         wrapper = network.wrapper.LossWrapLinear(args, net, criterion)
     else:
         if args.TRAIN.self_supervised_method == "simclr":
             if args.TRAIN.vae:
-                wrapper = network.wrapper.LossWrapVAE(args, net, vae, head, rec_loss=rec_loss, kl_loss=kl_loss, cont_loss=criterion)
+                wrapper = network.wrapper.LossWrapVAE(
+                    args, net, vae, head, rec_loss=rec_loss, kl_loss=kl_loss, cont_loss=criterion)
             else:
                 wrapper = network.wrapper.LossWrapSimCLR(
                     args, net, head, criterion)
         else:
-            wrapper = network.wrapper.LossWrap(args, net, head, criterion)
+            if args.DATA.is_episode:
+                wrapper = network.wrapper.LossWrapEpisode(
+                    args, net, head, criterion)
+            else:
+                wrapper = network.wrapper.LossWrap(args, net, head, criterion)
 
     wrapper = wrapper.cuda()
 
@@ -254,15 +271,16 @@ def train():
                 else:
                     parameters = [
                         {"params": net.parameters(), "lr": args.OPTIM.lr,
-                        "weight_deacy": 1e-6},
+                         "weight_deacy": 1e-6},
                     ]
                 parameters.append(
-                    {"params": vae.parameters(), "lr": args.OPTIM.lr, "weight_decay": 1e-6}
+                    {"params": vae.parameters(), "lr": args.OPTIM.lr,
+                     "weight_decay": 1e-6}
                 )
             else:
                 parameters = [
                     {"params": net.parameters(), "lr": args.OPTIM.lr,
-                    "weight_deacy": 1e-6},
+                     "weight_deacy": 1e-6},
                 ]
             if not args.TRAIN.finetune_linear:
                 parameters.append(
@@ -277,12 +295,13 @@ def train():
             if args.TRAIN.vae:
                 parameters = []
                 parameters.append(
-                    {"params": vae.parameters(), "lr": args.OPTIM.lr, "weight_decay": 1e-6, "momentum": 0.9}
+                    {"params": vae.parameters(), "lr": args.OPTIM.lr,
+                     "weight_decay": 1e-6, "momentum": 0.9}
                 )
             else:
                 parameters = [
                     {"params": net.parameters(), "lr": args.OPTIM.lr,
-                    "weight_deacy": 1e-6, "momentum": 0.9},
+                     "weight_deacy": 1e-6, "momentum": 0.9},
                 ]
             if not args.TRAIN.finetune_linear:
                 parameters.append(
@@ -331,16 +350,29 @@ def train():
             msglogger.info("Start epoch {}".format(epoch))
             trn_info = epoch_func.train_epoch(
                 wrapper, train_loader, optimizer, epoch, args, logger=trn_logger)
-            val_info = epoch_func.valid_epoch(
-                wrapper, val_loader, epoch, args, logger=val_logger)
+
+            if args.TRAIN.self_supervised_method.startswith("supervise"):
+                if args.DATA.is_episode:
+                    val_info = epoch_func.valid_epoch(
+                        wrapper, val_loader, epoch, args, logger=val_logger)
+                else:
+                    val_info = None
+                # val_info = None
+            else:
+                val_info = epoch_func.valid_epoch(
+                    wrapper, val_loader, epoch, args, logger=val_logger)
             # trn_info = {"acc":0}
             # val_info = {"acc": 0}
-            val_result = None
-            if not args.TRAIN.finetune_linear:
+            val_result = val_info
+            # print(val_result)
+            # sfda
+            if not args.TRAIN.finetune_linear and val_info is not None:
                 # if epoch % args.DATA.feature_save_freq == 0 and epoch > 0:
                 if args.TRAIN.vae:
-                    val_result = epoch_func.valid_inference_vae(wrapper.model, wrapper.vae, val_loader, epoch, args, logger=val_logger)
-                else:
+                    val_result = epoch_func.valid_inference_vae(
+                        wrapper.model, wrapper.vae, val_loader, epoch, args, logger=val_logger)
+                # elif not args.DATA.is_episode:
+                elif val_info is None:
                     val_result = epoch_func.valid_inference(
                         wrapper.model, val_loader, epoch, args, logger=val_logger)
             # val_result = epoch_func.valid_inference(
@@ -361,8 +393,10 @@ def train():
                 val_msg = "Test: "
                 for name, value in val_result.items():
                     val_msg += "{}:{:.4f} ".format(name, value)
+            # elif args.TEST.mode == "few_shot" and not args.DATA.is_episode:
             elif args.TEST.mode == "few_shot":
-                score = val_result["mean_acc_{}_cossim".format(args.TEST.n_support)]
+                score = val_result["mean_acc_{}_cossim".format(
+                    args.TEST.n_support)]
                 val_msg = "Test: "
                 for name, value in val_result.items():
                     if name.startswith("mean"):
@@ -372,6 +406,9 @@ def train():
                 for name in key_list:
                     if name.startswith("each_"):
                         val_msg += "{}:{:.4f} ".format(name, val_result[name])
+            # else:
+                # score = val_info["pseudo_acc"]
+                # val_msg = ""
 
             iter_end = time.time() - train_since
             msg = "Epoch:[{}/{}] lr:{} elapsed_time:{:.4f}s mean epoch time:{:.4f}s".format(epoch,
@@ -379,10 +416,13 @@ def train():
             msglogger.info(msg)
             msglogger.info(val_msg)
 
-            msg = "Valid: "
-            for name, value in val_info.items():
-                msg += "{}:{:.4f} ".format(name, value)
-            msglogger.info(msg)
+            if val_info is not None:
+                msg = "Valid: "
+                for name, value in val_info.items():
+                    if name.startswith("mean") or name.startswith("each"):
+                        continue
+                    msg += "{}:{:.4f} ".format(name, value)
+                msglogger.info(msg)
 
             msg = "TRAIN: "
             for name, value in trn_info.items():

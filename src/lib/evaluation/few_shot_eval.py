@@ -72,7 +72,7 @@ def evaluate_fewshot(features, labels, args):
         support_mean_feats_all = np.array(support_mean_feats_all)
         support_one_feats = np.array(support_one_feats)
 
-        for method in ("cossim", "l2euc"):
+        for method in ("cossim", "l2euc", "innerprod"):
             result_n = calc_accuracy(query_feats_all, query_labels_all,
                                      support_mean_feats_all, sampled_class, args, args.TEST.n_support, distance_metric=method)
             for key, value in result_n.items():
@@ -253,6 +253,13 @@ def calc_accuracy(query_feats_all, query_labels_all, support_feats_all, support_
     elif distance_metric == "normal":
         assert len(query_feats_all) == 2
         distance_mat = calc_normal_prob(query_feats_all, support_feats_all)
+    elif distance_metric == "innerprod":
+        if isinstance(query_feats_all, tuple):
+            query_feats_m, query_feats_s = query_feats_all
+            support_feats_m, support_feats_s = support_feats_all
+            distance_mat = calc_innerprod(query_feats_m, support_feats_m)
+        else:
+            distance_mat = calc_innerprod(query_feats_all, support_feats_all)
     pred_label_index = np.argmax(distance_mat, axis=1)
     pred_label = support_class[pred_label_index]
     mean_acc = np.mean(pred_label == query_labels_all)
@@ -274,6 +281,11 @@ def calc_cossim_dist(feature1, feature2):
     return distance_mat
 
 
+def calc_innerprod(feature1, feature2):
+    distance_mat = np.dot(feature1, feature2.T)
+    return distance_mat
+
+
 def calc_l2_dist(feature1, feature2):
     # (Qn, D), (Sn, D)
     XX = np.sum(feature1*feature1, axis=1, keepdims=True)
@@ -282,6 +294,79 @@ def calc_l2_dist(feature1, feature2):
     # print(XX.shape, XY.shape, YY.shape, feature1.shape)
 
     dist = XX - 2 * XY + YY
-    dist = np.sqrt(dist)
+    dist = np.sqrt(np.abs(dist))
 
     return -dist
+
+
+def fewshot_eval_meta(raw_logits, n_support, n_query, meta_mode="cossim"):
+    raw_logits = raw_logits[:, :, -(n_support+n_query):]
+    B, n_way, n_sample, D = raw_logits.shape
+    support_feats = raw_logits[:, :, :n_support]
+
+    support_feats = torch.mean(support_feats, dim=2)  # (B, n_class, feat_dim)
+
+    query_feats = raw_logits[:, :, n_support:]
+    query_feats = query_feats.reshape(
+        B, n_way*n_query, -1)
+    label_episode = torch.arange(n_way,
+                                 dtype=torch.long, device=query_feats.device)
+    label_episode = label_episode.view(-1,
+                                       1).repeat(B, n_query).reshape(-1)
+    # if not self.training:
+    #     print(label_episode)
+    # # print(label)
+    # # print(label_episode)
+    # # print(label)
+    #     label = label.reshape(B,  self.n_way, n_sample)
+    # # # print(label)
+    #     query_label = label[:, :, n_support:]
+    #     query_label = query_label.reshape(B, self.n_way*n_query, -1).reshape(-1)
+    #     print(query_label)
+    #     sdfa
+    if meta_mode == "cossim":
+        logit = compute_cosine_similarity(
+                    support_feats, query_feats,
+                    n_way=n_way
+                )
+    elif meta_mode == "euc":
+        logit = metric.calc_l2_dist_torch(
+            query_feats, support_feats, dim=2
+        )
+        # logit = logit.permute(0, 2, 1)
+        logit = logit.reshape(-1, n_way)
+    elif meta_mode == "innerprod":
+        logit = compute_cosine_similarity(
+            support_feats,
+            query_feats,
+            is_norm=False
+        )
+    else:
+        raise NotImplementedError
+
+    _, pred = torch.max(logit, dim=1)
+    correct = np.mean(pred.cpu().numpy() == label_episode.numpy())
+    # loss = self.criterion(logit, label_episode)
+    # log_p_y = F.log_softmax(logit, dim=1).view(B*n_way, n_query, -1)
+    # loss_2 = -log_p_y.gather(2, label_episode.reshape(B*n_way, n_query, 1)).mean()
+    # print(label_episode)
+    # print(label)
+    # sdfa
+
+    return correct
+
+
+def compute_cosine_similarity(support_feats, query_feats, logit_scale=8, n_way=5, is_norm=True):
+    if is_norm:
+        query_feats = F.normalize(query_feats, dim=2)
+        support_feats = F.normalize(support_feats, dim=2)
+    # print(query_feats.size(), support_feats.size())
+    cossim = torch.bmm(query_feats, support_feats.permute(0, 2, 1))
+    # assert cossim.max() <= 1.001, cossim.max()
+    cossim = cossim * logit_scale
+    # order in one batch = (C1, C1, C1, ..., C2, C2, C2, ...)
+    # cossim = cossim.permute(0, 2, 1)
+    # print(cossim.shape, query_feats.shape)
+    cossim = cossim.reshape(-1, n_way)
+
+    return cossim

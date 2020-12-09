@@ -19,6 +19,7 @@ from torchvision.transforms import transforms
 from PIL import Image
 from .dataset_utils import cv2pil
 
+
 class MiniImageNet(data.Dataset):
 
     def __init__(self, split, args, logger, trans=None, c_aug=None, s_aug=None):
@@ -44,7 +45,21 @@ class MiniImageNet(data.Dataset):
         self.logger.info("### USE SHAPE AUGUMENTATION ###")
         self.logger.info(str(s_aug))
 
-        self.mode = "train"
+        if self.split == "train":
+            self.mode = "train"
+            self.n_way = self.args.TRAIN.n_way
+            self.n_support = self.args.TRAIN.n_support
+            self.n_query = self.args.TRAIN.n_query
+            self.nb_sample_per_class = self.n_query + self.n_support
+            self.length = self.args.TRAIN.eval_freq * self.args.DATA.batch_size
+
+        else:
+            self.mode = "eval"
+            self.n_way = self.args.TEST.n_way
+            self.n_support = self.args.TEST.n_support
+            self.n_query = self.args.TEST.n_query
+            self.nb_sample_per_class = self.n_query + self.n_support
+            self.length = self.args.TEST.few_shot_n_test
 
         self.logger.info(f"setup cifar {split} ==>")
         data = self.setup_data()
@@ -83,7 +98,7 @@ class MiniImageNet(data.Dataset):
         else:
             path_list = pathlib.Path(self.args.DATA.data_root_dir).glob(
                 self.args.DATA.data_test_reg_exp)
-        
+
         all_data = collections.defaultdict(list)
         for path in tqdm(path_list, total=len(class_info)*600):
             image = cv2.imread(str(path))
@@ -112,7 +127,7 @@ class MiniImageNet(data.Dataset):
         return data_data
 
     def __len__(self):
-        return self.args.TRAIN.eval_freq * self.args.DATA.batch_size
+        return self.length
 
     def augment_simclr(self, data):
         if self.c_aug is not None:
@@ -129,7 +144,8 @@ class MiniImageNet(data.Dataset):
                 if self.s_aug is not None:
                     data1 = self.s_aug(image=data1)
         else:
-            assert self.args.TRAIN.self_supervised_method.startswith("supervise")
+            assert self.args.TRAIN.self_supervised_method.startswith(
+                "supervise")
             data1 = data
         data1 = self.trans(data1)
 
@@ -183,20 +199,24 @@ class MiniImageNet(data.Dataset):
         return image
 
     def pickup(self, index):
-        pick_class_labels = np.random.choice(self.class_list, self.args.DATA.n_class_train, replace=False)
-
+        pick_class_labels = np.random.choice(
+            self.class_list, self.n_way, replace=False)
+        assert len(np.unique(pick_class_labels)) == len(
+            pick_class_labels), pick_class_labels
         input_data = []
         labels = []
         real_names = []
         for class_label in pick_class_labels:
-            sample_num_per_class = np.arange(len(self.dataset["data"][class_label]))
-            pick_indices = np.random.choice(sample_num_per_class, self.args.DATA.nb_sample_per_class, replace=False)
+            sample_num_per_class = np.arange(
+                len(self.dataset["data"][class_label]))
+            pick_indices = np.random.choice(
+                sample_num_per_class, self.nb_sample_per_class, replace=False)
             for index in pick_indices:
                 pick_data = self.dataset["data"][class_label][index]
                 image = self.pickup_one_sample(pick_data["image"])
                 input_data.append(image)
                 real_names.append(self.class_info[pick_data["label_code"]])
-            labels.extend([class_label]*self.args.DATA.nb_sample_per_class)
+            labels.extend([class_label]*self.nb_sample_per_class)
 
         labels = np.array(labels)
         input_data = torch.stack(input_data, dim=0)

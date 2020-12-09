@@ -86,8 +86,8 @@ def calc_l2_dist_torch(feature1, feature2, dim=1):
     # print(XX.shape, XY.shape, YY.shape, feature1.shape)
 
     dist = XX - 2 * XY + YY
-    dist = torch.sqrt(dist)
-    print(dist.shape)
+    # print(dist)
+    # dist = torch.sqrt(dist+1e-6)
     
     return -dist
 

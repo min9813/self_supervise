@@ -39,9 +39,6 @@ __C.DATA.data_train_reg_exp = ""
 __C.DATA.data_val_reg_exp = ""
 __C.DATA.data_test_reg_exp = ""
 __C.DATA.is_episode = False
-__C.DATA.nb_sample_per_class = 10
-__C.DATA.n_support = 5
-__C.DATA.n_class_train = 20
 __C.DATA.class_json_files = {
     "train": "",
     "val": "",
@@ -60,8 +57,8 @@ __C.TRAIN.shuffle_simclr = True
 __C.TRAIN.logit_scale = 16
 __C.TRAIN.color_aug = False
 __C.TRAIN.shape_aug = False
-__C.TRAIN.n_way = 5
-__C.TRAIN.n_query = 15
+__C.TRAIN.n_way = 20
+__C.TRAIN.n_query = 5
 __C.TRAIN.n_support = 5
 __C.TRAIN.vae = False
 __C.TRAIN.prior_agg = False
