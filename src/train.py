@@ -25,6 +25,7 @@ import lib.utils.average_meter as average_meter
 import lib.utils.epoch_func as epoch_func
 import lib.utils.get_aug_and_trans as get_aug_and_trans
 import lib.network as network
+import lib.embeddings as embeddings
 from torch.optim import lr_scheduler
 from lib.utils.configuration import cfg as args
 from lib.utils.configuration import cfg_from_file, format_dict, check_parameters
@@ -138,8 +139,8 @@ def train():
                 trn_dataset = dataset.miniimagenet.MiniImageNet(
                     "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
                 valid_batch_size = args.DATA.batch_size
-                val_dataset = dataset.miniimagenet.MiniImageNet(
-                    "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+            # val_dataset = dataset.miniimagenet.MiniImageNet(
+                # "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
             args.has_same = True
 
     train_loader = torch.utils.data.DataLoader(
@@ -241,6 +242,29 @@ def train():
     else:
         criterion = nn.CrossEntropyLoss()
 
+    if args.MODEL.embedding_flag:
+        if args.MODEL.embedding_algorithm == "lle":
+            embedder = embeddings.locally_linear_embedding.LLE(
+                n_neighbors=args.TRAIN.lle_n_neighbors,
+                n_class=args.TRAIN.n_way,
+                n_support=args.TRAIN.n_support,
+                n_query=args.TRAIN.n_query,
+                device=args.device
+            )
+
+        elif args.MODEL.embedding_algorithm == "mds":
+            embedder = embeddings.mds.MDSTorch(
+                metric_type=args.MODEL.mds_metric_type
+            )
+
+        elif args.MODEL.embedding_algorithm == "svd":
+            embedder = embeddings.svd.SVDTorch()
+
+        else:
+            raise NotImplementedError(f"embedding algotirhm \'{args.MODEL.embedding_algorithm}\' not implemented")
+    else:
+        embedder = None
+
     if args.TRAIN.finetune_linear:
         wrapper = network.wrapper.LossWrapLinear(args, net, criterion)
     else:
@@ -254,14 +278,28 @@ def train():
         else:
             if args.DATA.is_episode:
                 wrapper = network.wrapper.LossWrapEpisode(
-                    args, net, head, criterion)
+                    args, net, head, criterion, embedding=embedder)
             else:
                 wrapper = network.wrapper.LossWrap(args, net, head, criterion)
 
     wrapper = wrapper.cuda()
 
     if args.run_mode == "test":
-        pass
+        epoch = -1
+        # if args.DATA.is_episode:
+            # val_result = epoch_func.valid_epoch(
+                    # wrapper, val_loader, epoch, args, logger=val_logger)
+        # else:
+        val_result = epoch_func.valid_inference(
+                    wrapper.model, val_loader, epoch, args, logger=val_logger)
+        # pass                msg = "Valid: "
+        msg = "Valid:"
+        for name, value in val_result.items():
+            if name.startswith("each"):
+                continue
+            msg += "{}:{:.4f} ".format(name, value)
+        msglogger.info(msg)
+
     elif args.run_mode == "train":
 
         if args.OPTIM.optimizer == "adam":
@@ -395,7 +433,7 @@ def train():
                     val_msg += "{}:{:.4f} ".format(name, value)
             # elif args.TEST.mode == "few_shot" and not args.DATA.is_episode:
             elif args.TEST.mode == "few_shot":
-                score = val_result["mean_acc_{}_cossim".format(
+                score = val_result["mean_m_acc_{}_cossim".format(
                     args.TEST.n_support)]
                 val_msg = "Test: "
                 for name, value in val_result.items():

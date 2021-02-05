@@ -75,21 +75,27 @@ def calc_l2_dist_numpy(feature1, feature2):
     return -dist
 
 
-def calc_l2_dist_torch(feature1, feature2, dim=1):
-    XX = torch.sum(feature1*feature1, axis=dim, keepdims=True)
+def calc_l2_dist_torch(feature1, feature2, dim=1, is_sqrt=False, is_neg=True):
+    XX = torch.sum(feature1*feature1, dim=dim, keepdim=True)
     if dim == 1:
         XY = torch.mm(feature1, feature2.T)
-        YY = torch.sum(feature2*feature2, axis=dim, keepdims=True).T
+        YY = torch.sum(feature2*feature2, dim=dim, keepdim=True).T
     else:
         XY = torch.bmm(feature1, feature2.permute(0, 2, 1))
-        YY = torch.sum(feature2*feature2, axis=dim, keepdims=True).permute(0, 2, 1)
+        YY = torch.sum(feature2*feature2, dim=dim,
+                       keepdim=True).permute(0, 2, 1)
     # print(XX.shape, XY.shape, YY.shape, feature1.shape)
 
     dist = XX - 2 * XY + YY
-    # print(dist)
-    # dist = torch.sqrt(dist+1e-6)
     
-    return -dist
+    if is_sqrt:
+        dist = torch.sqrt(dist.abs())
+    # dist = dist.clamp(min=0)
+    # dist = torch.sqrt(dist)
+    if is_neg:
+        dist = - dist
+
+    return dist
 
 
 if __name__ == "__main__":

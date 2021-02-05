@@ -172,7 +172,7 @@ def valid_epoch(wrappered_model, train_loader, epoch, args, logger=None):
                 pseudo_label = data["label"]
                 label = data["label"].reshape(-1)
             since = time.time()
-
+            # print("input x:", input_x.shape)
             output = wrappered_model(input_x, pseudo_label)
 
             if len(output) == 2:
@@ -213,19 +213,19 @@ def valid_epoch(wrappered_model, train_loader, epoch, args, logger=None):
             if args.TRAIN.self_supervised_method.startswith("supervise"):
                 raw_logits = raw_logits.cpu()
                 # print(raw_logits.shape)
-                for n_sp in [1, args.TEST.n_support]:
-                    for meta_mode in ("cossim", "euc", "innerprod"):
-                        acc = few_shot_eval.fewshot_eval_meta(
-                            raw_logits=raw_logits, n_support=n_sp,
-                            n_query=args.TEST.n_query,
-                            meta_mode=meta_mode
-                        )
-                        meter.add_value(
-                            "meta_mean_{}_{}".format(n_sp, meta_mode), acc)
+                # for n_sp in [1, args.TEST.n_support]:
+                #     for meta_mode in ("cossim", "euc", "innerprod"):
+                #         acc = few_shot_eval.fewshot_eval_meta(
+                #             raw_logits=raw_logits, n_support=n_sp,
+                #             n_query=args.TEST.n_query,
+                #             meta_mode=meta_mode
+                #         )
+                #         meter.add_value(
+                #             "meta_mean_{}_{}".format(n_sp, meta_mode), acc)
                 train_labels.append(label)
                 raw_logits = raw_logits.reshape(-1, D)
                 check_equal(len(raw_logits), len(label))
-                train_logits.append(raw_logits.cpu())
+                train_logits.append(raw_logits)
             meter.add_value("loss_total", loss)
 
             # if now_num < save_num:

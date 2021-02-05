@@ -64,6 +64,7 @@ __C.TRAIN.vae = False
 __C.TRAIN.prior_agg = False
 __C.TRAIN.vae_pretrain_freeze = True
 __C.TRAIN.meta_mode = "cossim"
+__C.TRAIN.lle_n_neighbors = 5
 
 __C.TEST.neighbor_k = 200
 __C.TEST.batch_size = 2000
@@ -75,6 +76,9 @@ __C.TEST.few_shot_n_test = 1000
 __C.TEST.distance_metric = "l2euc"
 __C.TEST.mode = "few_show"
 __C.TEST.agg_stats_method = "propose"
+__C.TEST.knn_num_ks = [1, 3, 5]
+__C.TEST.lle_n_neighbors = 5
+
 
 __C.OPTIM.optimizer = "adam"
 __C.OPTIM.lr = 1e-4
@@ -103,6 +107,11 @@ __C.MODEL.head = "1layer"
 __C.MODEL.linear_layers = []
 __C.MODEL.vae_zdim = 128
 __C.MODEL.vae_layers = []
+
+__C.MODEL.embedding_flag = False
+__C.MODEL.embedding_algorithm = "lle"
+__C.MODEL.embedding_method = "naive"
+__C.MODEL.mds_metric_type = "euclidean"
 
 __C.debug = True
 __C.run_mode = "train"

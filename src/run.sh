@@ -85,5 +85,9 @@
 # python train.py config/fewshot/supervise_cossim_scale24.yaml
 # python train.py config/fewshot/simclr_exp1_scale16.yaml
 
-python train.py config/fewshot/supervise_meta_cossim_noorg.yaml
-python train.py config/fewshot/supervise_meta_cossim.yaml
+# python train.py config/fewshot/supervise_meta_cossim_noorg.yaml
+# python train.py config/fewshot/supervise_meta_cossim.yaml
+
+python train.py config/fewshot/lle_embed_supervise_meta.yaml
+python train.py config/fewshot/mds_embed_supervise_meta.yaml
+python train.py config/fewshot/svd_embed_supervise_meta.yaml

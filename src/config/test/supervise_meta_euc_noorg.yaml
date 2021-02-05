@@ -1,0 +1,87 @@
+DATA:
+  dataset: miniimagenet
+  batch_size: 1
+  cifar_root_dir: /home/min9813/project/data/cifar-10-batches-py
+  cifar_meta_file: batches.meta
+  cifar_train_reg_exp: data_batch*[1|2|3|4|5]
+  cifar_val_reg_exp: test_batch
+  cifar_test_reg_exp: test_batch
+
+  data_root_dir: /home/min9813/project/data/mini-imagenet
+  data_train_reg_exp: processed_images/train/*/*
+  data_val_reg_exp: processed_images/val/*/*
+  data_test_reg_exp: processed_images/test/*/*
+
+  class_json_files:
+    train: class_info_train.json
+    test: class_info_test.json
+    val: class_info_val.json
+
+  image_size: 84
+
+  feature_root_dir: /home/min9813/project/data/cifar_feature/
+  is_episode: True
+
+
+TRAIN:
+  total_epoch: 200
+  start_epoch: 1
+  eval_freq: 200
+  fp16: True
+  self_supervised_method: supervise_cossim
+  color_aug: False
+  shape_aug: False
+  logit_scale: 8
+  vae: False
+  meta_mode: euc
+  n_way: 20
+  n_query: 5
+  n_support: 5
+
+TEST:
+  test_logit_scale: 8
+  neighbor_k: 200
+  batch_size: 2000
+  n_way: 5
+  n_query: 15
+  n_support: 100
+  few_shot_n_test: 600
+  distance_metric: cossim
+  mode: few_shot
+  knn_num_ks: [1, 3, 5, 10, 50, 100]
+
+OPTIM:
+  optimizer: adam
+  lr: 0.001
+  lr_scheduler: "patience"
+  lr_gamma: 0.1
+  lr_cooldown: 5
+  lr_patience: 100000000
+  lr_min: 0.000001
+
+LOG:
+  save_dir: ../logs
+  train_print_iter: 50
+
+MODEL:
+  save_dir: ../models
+  resume_net_path: "../models/fewshot/supervise_meta_euc_noorg/best_amp_net.ckpt"  
+  resume_opt_path: ""
+  resume_extractor_path: "../models/fewshot/simclr_exp2/best_amp_net.ckpt"
+  resume: True
+  network: resnet18
+  # head: [512,256]
+  linear_layers: []
+  vae_zdim: 128
+  vae_layers: [512, 256]
+  delete_old: True
+
+debug: False
+run_mode: test
+seed: 1234
+gpus: "0"
+use_multi_gpu: False
+cuda_id: 0
+num_workers: 4
+input_ch: 3
+num_classes: 64

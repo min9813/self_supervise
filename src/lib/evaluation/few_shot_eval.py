@@ -17,9 +17,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import scipy
+import lib.embeddings.locally_linear_embedding as locally_linear_embedding
 import lib.utils.average_meter as average_meter
 import lib.lossfunction.metric as metric
 from tqdm import tqdm
+from . import knn
+
+
+def check_equal(a, b):
+    assert a == b, (a, b)
 
 
 def evaluate_fewshot(features, labels, args):
@@ -43,6 +49,14 @@ def evaluate_fewshot(features, labels, args):
     sample_class_num = min(args.TEST.n_way, len(sample_class_cands))
     print("sample_class_num:", sample_class_num)
 
+    LLE = locally_linear_embedding.LLE(
+        n_neighbors=args.TEST.lle_n_neighbors,
+        n_class=args.TEST.n_way,
+        n_support=args.TEST.n_support,
+        n_query=args.TEST.n_query,
+        device=args.device
+    )
+
     for each_test_idx in tqdm(range(args.TEST.few_shot_n_test)):
         sampled_class = np.random.choice(
             sample_class_cands, sample_class_num, replace=False)
@@ -51,6 +65,7 @@ def evaluate_fewshot(features, labels, args):
         query_labels_all = []
         support_mean_feats_all = []
         support_one_feats = []
+        support_all_feats = []
         for label in sampled_class:
             class_sample_num = len(class2feature[label])
             sampled_index = np.random.choice(np.arange(
@@ -60,17 +75,34 @@ def evaluate_fewshot(features, labels, args):
 
             support_feats = sampled_feats[:args.TEST.n_support]
             query_feats = sampled_feats[args.TEST.n_support:]
+
             support_one_feats.append(support_feats[0])
 
-            support_feats = np.mean(support_feats, axis=0)
+            support_mean_feats = np.mean(support_feats, axis=0)
             query_feats_all.append(query_feats)
             query_labels_all.extend([label]*args.TEST.n_query)
-            support_mean_feats_all.append(support_feats)
+            support_mean_feats_all.append(support_mean_feats)
+            # support_feats = np.concatenate((support_feats, support_mean_feats[None]))
+            support_all_feats.append(
+                support_feats
+            )
 
         query_feats_all = np.concatenate(query_feats_all)
         query_labels_all = np.array(query_labels_all)
         support_mean_feats_all = np.array(support_mean_feats_all)
         support_one_feats = np.array(support_one_feats)
+        support_all_feats = np.array(support_all_feats)
+
+        if args.MODEL.embedding_flag:
+            support_all_feats, query_feats_all = embedding_one_episode(
+                support_feats=support_all_feats,
+                query_feats=query_feats_all,
+                embedder=LLE,
+                method=args.MODEL.embedding_method
+            )
+
+            support_one_feats = support_all_feats[:, 0]
+            support_mean_feats_all = np.mean(support_all_feats, axis=1)
 
         for method in ("cossim", "l2euc", "innerprod"):
             result_n = calc_accuracy(query_feats_all, query_labels_all,
@@ -80,6 +112,11 @@ def evaluate_fewshot(features, labels, args):
             result_one = calc_accuracy(
                 query_feats_all, query_labels_all, support_one_feats, sampled_class, args, num_s=1, distance_metric=method)
             for key, value in result_one.items():
+                meter.add_value("{}_{}".format(key, method), value)
+
+            result_knn = calc_accuracy(
+                query_feats_all, query_labels_all, support_all_feats, sampled_class, args, num_s=args.TEST.n_support, distance_metric=method, is_knn=True)
+            for key, value in result_knn.items():
                 meter.add_value("{}_{}".format(key, method), value)
 
     val_info = meter.get_summary()
@@ -140,6 +177,7 @@ def evaluate_fewshot_vae(z_mean, z_sigma, labels, args):
             support_feats_s = sampled_feats_s[:args.TEST.n_support]
             query_feats_m = sampled_feats_m[args.TEST.n_support:]
             query_feats_s = sampled_feats_s[args.TEST.n_support:]
+
             support_one_feats_m.append(support_feats_m[0])
             support_one_feats_s.append(support_feats_s[0])
 
@@ -178,6 +216,32 @@ def evaluate_fewshot_vae(z_mean, z_sigma, labels, args):
     val_info = meter.get_summary()
 
     return val_info
+
+
+def embedding_one_episode(support_feats, query_feats, embedder, method="naive"):
+    """
+    support_feats: (n_class, n_support, dim)
+    query_feats: (n_class*n_query, dim)
+    """
+    n_support, n_class = support_feats.shape[:2]
+    # n_query, _ = query_feats.shape[:2]
+
+    support_feats = torch.Tensor(support_feats.reshape(n_class*n_support, -1))
+    query_feats = torch.Tensor(query_feats)
+
+    support_embedding, query_embedding = embedder(
+        support_vector=support_feats,
+        query_vector=query_feats,
+        method=method
+    )
+    # print("finish")
+    support_embedding = support_embedding.numpy()
+    query_embedding = query_embedding.numpy()
+
+    support_embedding = support_embedding.reshape(n_class, n_support, -1)
+    # query_embedding = query_embedding.reshape(n_class, n_query, -1)
+
+    return support_embedding, query_embedding
 
 
 def calc_minimum_weight(sigma_array):
@@ -234,8 +298,19 @@ def calc_normal_prob(query_feats_all, support_feats_all):
     return dist
 
 
-def calc_accuracy(query_feats_all, query_labels_all, support_feats_all, support_class, args, num_s, distance_metric="cossim"):
+def calc_accuracy(query_feats_all, query_labels_all, support_feats_all, support_class, args, num_s, distance_metric="cossim", is_knn=False):
     result = {}
+    if is_knn and len(support_feats_all.shape) == 3:
+        n_class, n_support, D = support_feats_all.shape
+        assert D == query_feats_all.shape[-1], support_feats_all.shape
+        support_feats_all = support_feats_all.reshape(-1, D)
+        support_class_for_knn = np.repeat(support_class, n_support)
+        check_equal(len(support_class_for_knn), len(support_feats_all))
+        name = "knn"
+
+    else:
+        name = "m"
+
     if distance_metric == "cossim":
         if isinstance(query_feats_all, tuple):
             query_feats_m, query_feats_s = query_feats_all
@@ -243,6 +318,7 @@ def calc_accuracy(query_feats_all, query_labels_all, support_feats_all, support_
             distance_mat = calc_cossim_dist(query_feats_m, support_feats_m)
         else:
             distance_mat = calc_cossim_dist(query_feats_all, support_feats_all)
+
     elif distance_metric == "l2euc":
         if isinstance(query_feats_all, tuple):
             query_feats_m, query_feats_s = query_feats_all
@@ -250,9 +326,11 @@ def calc_accuracy(query_feats_all, query_labels_all, support_feats_all, support_
             distance_mat = calc_l2_dist(query_feats_m, support_feats_m)
         else:
             distance_mat = calc_l2_dist(query_feats_all, support_feats_all)
+
     elif distance_metric == "normal":
         assert len(query_feats_all) == 2
         distance_mat = calc_normal_prob(query_feats_all, support_feats_all)
+
     elif distance_metric == "innerprod":
         if isinstance(query_feats_all, tuple):
             query_feats_m, query_feats_s = query_feats_all
@@ -260,14 +338,30 @@ def calc_accuracy(query_feats_all, query_labels_all, support_feats_all, support_
             distance_mat = calc_innerprod(query_feats_m, support_feats_m)
         else:
             distance_mat = calc_innerprod(query_feats_all, support_feats_all)
-    pred_label_index = np.argmax(distance_mat, axis=1)
-    pred_label = support_class[pred_label_index]
-    mean_acc = np.mean(pred_label == query_labels_all)
-    result["mean_acc_{}".format(num_s)] = mean_acc
-    for label in support_class:
-        this_label_mask = (query_labels_all == label)
-        this_label_acc = np.mean(pred_label[this_label_mask] == label)
-        result["each_{}_mean_acc_{}".format(label, num_s)] = this_label_acc
+
+    if is_knn:
+        for topk in args.TEST.knn_num_ks:
+            pred_label_knn = knn.knn_hard_from_distmat(
+                distance_mat=-distance_mat,
+                labels=support_class_for_knn,
+                topk=topk
+            )
+            mean_acc = np.mean(pred_label_knn == query_labels_all)
+            result["mean_{}_acc_{}".format(name, topk)] = mean_acc
+            # for label in support_class:
+            #     this_label_mask = (query_labels_all == label)
+            #     this_label_acc = np.mean(pred_label[this_label_mask] == label)
+            #     result["each_{}_{}_mean_acc_{}".format(name, label, topk)] = this_label_acc
+    else:
+        pred_label_index = np.argmax(distance_mat, axis=1)
+        pred_label = support_class[pred_label_index]
+        mean_acc = np.mean(pred_label == query_labels_all)
+        result["mean_{}_acc_{}".format(name, num_s)] = mean_acc
+        for label in support_class:
+            this_label_mask = (query_labels_all == label)
+            this_label_acc = np.mean(pred_label[this_label_mask] == label)
+            result["each_{}_{}_mean_acc_{}".format(
+                name, label, num_s)] = this_label_acc
 
     return result
 
@@ -326,9 +420,9 @@ def fewshot_eval_meta(raw_logits, n_support, n_query, meta_mode="cossim"):
     #     sdfa
     if meta_mode == "cossim":
         logit = compute_cosine_similarity(
-                    support_feats, query_feats,
-                    n_way=n_way
-                )
+            support_feats, query_feats,
+            n_way=n_way
+        )
     elif meta_mode == "euc":
         logit = metric.calc_l2_dist_torch(
             query_feats, support_feats, dim=2

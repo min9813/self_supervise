@@ -3,19 +3,22 @@ import torch.nn as nn
 import torch.nn.functional as F
 try:
     import lib.lossfunction.metric as metric
+    # import lib.embeddings.locally_linear_embedding as locally_linear_embedding
 except ImportError:
     import sys
     sys.path.append("../")
     import lossfunction.metric as metric
+    # import embeddings.locally_linear_embedding as locally_linear_embedding
 
 
 class LossWrap(torch.nn.Module):
-    def __init__(self, args, model, head, criterion):
+    def __init__(self, args, model, head, criterion, embedding=None):
         self.args = args
         super(LossWrap, self).__init__()
         self.model = model
         self.head = head
         self.criterion = criterion
+        self.embedding = embedding
 
     def forward(self, input, label):
         if self.args.multi_gpus:
@@ -48,7 +51,7 @@ class LossWrapEpisode(LossWrap):
             n_query = self.args.TEST.n_query
             n_sample = n_support + n_query
 
-
+        # if self.training:
         B, CXN, C, W, H = input.size()
         input = input.reshape(-1, C, W, H)
         if self.args.multi_gpus:
@@ -63,39 +66,51 @@ class LossWrapEpisode(LossWrap):
         # raw_logits = self.model(input)
         # raw_logits = raw_logits[shuffle_index]
         raw_logits[shuffle_index] = raw_logits.clone()
+
         raw_logits = raw_logits.reshape(
             B, self.n_way, n_sample, -1)
 
         support_feats = raw_logits[:, :, :n_support]
 
-        support_feats = torch.mean(support_feats, dim=2)  # (B, n_class, feat_dim)
 
         query_feats = raw_logits[:, :, n_support:]
         query_feats = query_feats.reshape(
-            B, self.n_way*n_query, -1)
+                B, self.n_way*n_query, -1)
+        support_mean_feats = torch.mean(support_feats, dim=2)  # (B, n_class, feat_dim)
+        if self.args.MODEL.embedding_flag:
+            support_feats_all = []
+            query_feats_all = []
+            for data_index in range(B):
+                support_data = support_feats[data_index]
+                support_mean_data = support_mean_feats[data_index]
+                query_data = query_feats[data_index]
+
+                support_embedding, query_embedding = self.embedding_vectors(
+                    support_vectors=support_data,
+                    support_mean_vectors=support_mean_data,
+                    query_vectors=query_data
+                )
+                support_mean_embedding = torch.mean(support_embedding, dim=1)
+
+                support_feats_all.append(support_mean_embedding)
+                query_feats_all.append(query_embedding)
+
+            support_mean_feats = torch.stack(support_feats_all, dim=0)
+            query_feats = torch.stack(query_feats_all, dim=0)
+        else:
+            pass
+
         label_episode = torch.arange(self.n_way,
                                      dtype=torch.long, device=query_feats.device)
         label_episode = label_episode.view(-1,
                                            1)
         label_episode = label_episode.repeat(B, n_query).reshape(-1)
-        # label_episode_for_eval = label_episode.repeat(B, n_query).reshape(-1)
-        # label_episode_for_output = label_episode.repeat(B, n_sample, )
-        # if not self.training:
-        #     print(label_episode)
-        # # print(label)
-        # # print(label_episode)
-        # # print(label)
-        #     label = label.reshape(B,  self.n_way, n_sample) 
-        # # # print(label)
-        #     query_label = label[:, :, n_support:]
-        #     query_label = query_label.reshape(B, self.n_way*n_query, -1).reshape(-1)
-        #     print(query_label)
-        #     sdfa
+
         if self.args.TRAIN.meta_mode == "cossim":
-            logit = self.compute_cosine_similarity(support_feats, query_feats)
+            logit = self.compute_cosine_similarity(support_mean_feats, query_feats)
         elif self.args.TRAIN.meta_mode == "euc":
             logit = metric.calc_l2_dist_torch(
-                query_feats, support_feats, dim=2
+                query_feats, support_mean_feats, dim=2
             )
             # logit = logit.permute(0, 2, 1)
             logit = logit.reshape(-1, self.n_way)
@@ -103,12 +118,6 @@ class LossWrapEpisode(LossWrap):
             raise NotImplementedError
 
         loss = self.criterion(logit, label_episode)
-        # loss = self.criterion(logit, label_episode_for_eval)
-        # log_p_y = F.log_softmax(logit, dim=1).view(B*n_way, n_query, -1)
-        # loss_2 = -log_p_y.gather(2, label_episode.reshape(B*n_way, n_query, 1)).mean()
-        # print(label_episode)
-        # print(label)
-        # sdfa
 
         return loss, logit, label_episode, raw_logits
 
@@ -125,6 +134,24 @@ class LossWrapEpisode(LossWrap):
         cossim = cossim.reshape(-1, self.n_way)
 
         return cossim
+
+    def embedding_vectors(self, support_vectors, support_mean_vectors, query_vectors, use_mean=False):
+        """
+        support_vectors: torch.Tensor, (num_class, num_support, D)
+        query_vectors: torch.Tensor, (num_class*num_query, D)
+        """
+
+        n_class, n_support, D = support_vectors.shape
+        support_vectors = support_vectors.reshape(n_class*n_support, D)
+        support_embedding, query_embedding = self.embedding(
+            support_vector=support_vectors,
+            query_vector=query_vectors,
+            method=self.args.MODEL.embedding_method
+            )
+
+        support_embedding = support_embedding.reshape(n_class, n_support, -1)
+
+        return support_embedding, query_embedding
 
 
 class LossWrapLinear(torch.nn.Module):
