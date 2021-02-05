@@ -82,7 +82,7 @@ MODEL:
   embedding_algorithm: lle
   embedding_method: naive
 
-debug: True
+debug: False
 run_mode: train
 seed: 1234
 gpus: "0"
