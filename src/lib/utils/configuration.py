@@ -65,6 +65,7 @@ __C.TRAIN.prior_agg = False
 __C.TRAIN.vae_pretrain_freeze = True
 __C.TRAIN.meta_mode = "cossim"
 __C.TRAIN.lle_n_neighbors = 5
+__C.TRAIN.is_normal_cls_loss = False
 
 __C.TEST.neighbor_k = 200
 __C.TEST.batch_size = 2000
@@ -107,6 +108,7 @@ __C.MODEL.head = "1layer"
 __C.MODEL.linear_layers = []
 __C.MODEL.vae_zdim = 128
 __C.MODEL.vae_layers = []
+__C.MODEL.output_dim = 128
 
 __C.MODEL.embedding_flag = False
 __C.MODEL.embedding_algorithm = "lle"

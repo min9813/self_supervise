@@ -12,13 +12,14 @@ except ImportError:
 
 
 class LossWrap(torch.nn.Module):
-    def __init__(self, args, model, head, criterion, embedding=None):
+    def __init__(self, args, model, head, criterion, trn_embedding=None, val_embedding=None):
         self.args = args
         super(LossWrap, self).__init__()
         self.model = model
         self.head = head
         self.criterion = criterion
-        self.embedding = embedding
+        self.trn_embedding = trn_embedding
+        self.val_embedding = val_embedding
 
     def forward(self, input, label):
         if self.args.multi_gpus:
@@ -142,16 +143,172 @@ class LossWrapEpisode(LossWrap):
         """
 
         n_class, n_support, D = support_vectors.shape
-        support_vectors = support_vectors.reshape(n_class*n_support, D)
-        support_embedding, query_embedding = self.embedding(
-            support_vector=support_vectors,
-            query_vector=query_vectors,
-            method=self.args.MODEL.embedding_method
-            )
+        if "lda" not in self.trn_embedding.__class__.__name__:
+            support_vectors = support_vectors.reshape(n_class*n_support, D)
+
+        if self.training:
+            support_embedding, query_embedding = self.trn_embedding(
+                support_vector=support_vectors,
+                query_vector=query_vectors,
+                method=self.args.MODEL.embedding_method
+                )
+
+        else:
+            support_embedding, query_embedding = self.val_embedding(
+                support_vector=support_vectors,
+                query_vector=query_vectors,
+                method=self.args.MODEL.embedding_method
+                ) 
 
         support_embedding = support_embedding.reshape(n_class, n_support, -1)
 
         return support_embedding, query_embedding
+
+
+class LossWrapEpisodeLDA(LossWrap):
+
+    def forward(self, input, label):
+        # input = (B, n_class*n_sample, C, W, H)
+        if self.training:
+            self.n_way = self.args.TRAIN.n_way
+            n_support = self.args.TRAIN.n_support
+            n_query = self.args.TRAIN.n_query
+            n_sample = n_support + n_query
+        else:
+            self.n_way = self.args.TEST.n_way
+            n_support = self.args.TEST.n_support
+            n_query = self.args.TEST.n_query
+            n_sample = n_support + n_query
+
+        # if self.training:
+        B, CXN, C, W, H = input.size()
+        input = input.reshape(-1, C, W, H)
+        if self.args.multi_gpus:
+            input, label = input.cuda(), label.cuda()
+        else:
+            input, label = input.to(
+                self.args.device), label.to(self.args.device)
+
+        shuffle_index = torch.randperm(B*CXN, device=input.device)
+        shuffled_input = input[shuffle_index]
+        raw_logits = self.model(shuffled_input)
+        # raw_logits = self.model(input)
+        # raw_logits = raw_logits[shuffle_index]
+        raw_logits[shuffle_index] = raw_logits.clone()
+
+        raw_logits_2 = raw_logits.reshape(
+            B, self.n_way, n_sample, -1)
+
+        support_feats = raw_logits_2[:, :, :n_support]
+
+
+        query_feats = raw_logits_2[:, :, n_support:]
+        query_feats = query_feats.reshape(
+                B, self.n_way*n_query, -1)
+        support_mean_feats = torch.mean(support_feats, dim=2)  # (B, n_class, feat_dim)
+        if self.args.MODEL.embedding_flag:
+            # support_feats_all = []
+            # query_feats_all = []
+            lda_loss = 0
+            query_logit = []
+            for data_index in range(B):
+                support_data = support_feats[data_index]
+                support_mean_data = support_mean_feats[data_index]
+                query_data = query_feats[data_index]
+
+                each_lda_loss, logit, pick_v = self.embedding_vectors(
+                    support_vectors=support_data,
+                    support_mean_vectors=support_mean_data,
+                    query_vectors=query_data
+                )
+                lda_loss += each_lda_loss
+                query_logit.append(logit)
+
+            lda_loss = lda_loss / B
+            query_logit = torch.cat(query_logit)
+
+        else:
+            pass
+
+        label_episode = torch.arange(self.n_way,
+                                     dtype=torch.long, device=query_feats.device)
+        label_episode = label_episode.view(-1,
+                                           1)
+        label_episode = label_episode.repeat(B, n_query).reshape(-1)
+        # print(support_data.shape, query_logit.shape, label_episode.shape)
+
+        total_loss = self.criterion(query_logit, label_episode)
+        output = {
+            "loss_lda_logit": total_loss.detach(),
+            "loss_lda": lda_loss.detach()
+        }
+
+        total_loss += lda_loss
+
+        if self.args.TRAIN.is_normal_cls_loss:
+            if self.args.TRAIN.meta_mode == "cossim":
+                logit = self.compute_cosine_similarity(support_mean_feats, query_feats)
+            elif self.args.TRAIN.meta_mode == "euc":
+                logit = metric.calc_l2_dist_torch(
+                    query_feats, support_mean_feats, dim=2
+                )
+                # logit = logit.permute(0, 2, 1)
+                logit = logit.reshape(-1, self.n_way)
+            else:
+                raise NotImplementedError
+
+            loss = self.criterion(logit, label_episode)
+            total_loss += loss
+
+            output["loss_cls"] = loss
+
+        output["loss_total"] = total_loss
+        output["logit"] = query_logit
+        output["label_episode"] = label_episode
+        output["features"] = raw_logits
+
+        return output
+
+
+    def compute_cosine_similarity(self, support_feats, query_feats):
+        query_feats = F.normalize(query_feats, dim=2)
+        support_feats = F.normalize(support_feats, dim=2)
+        # print(query_feats.size(), support_feats.size())
+        cossim = torch.bmm(query_feats, support_feats.permute(0, 2, 1))
+        # assert cossim.max() <= 1.001, cossim.max()
+        cossim = cossim * self.args.TRAIN.logit_scale
+        # order in one batch = (C1, C1, C1, ..., C2, C2, C2, ...)
+        # cossim = cossim.permute(0, 2, 1)
+        # print(cossim.shape, query_feats.shape)
+        cossim = cossim.reshape(-1, self.n_way)
+
+        return cossim
+
+    def embedding_vectors(self, support_vectors, support_mean_vectors, query_vectors, use_mean=False):
+        """
+        support_vectors: torch.Tensor, (num_class, num_support, D)
+        query_vectors: torch.Tensor, (num_class*num_query, D)
+        """
+
+        n_class, n_support, D = support_vectors.shape
+            
+        if self.training:
+            lda_loss, logit, pick_v = self.trn_embedding(
+                support_vector=support_vectors,
+                query_vector=query_vectors,
+                method=self.args.MODEL.embedding_method
+                )
+
+        else:
+            lda_loss, logit, pick_v = self.val_embedding(
+                support_vector=support_vectors,
+                query_vector=query_vectors,
+                method=self.args.MODEL.embedding_method
+                ) 
+
+        # support_embedding = support_embedding.reshape(n_class, n_support, -1)
+
+        return lda_loss, logit, pick_v
 
 
 class LossWrapLinear(torch.nn.Module):

@@ -129,11 +129,16 @@ def supervise_naive_graph(n_class, n_support, n_query, reg=1e-3, device="cpu"):
     label_to_unlabel_neighbors = label_to_unlabel_neighbors[None, :].repeat(
         label_num, 1)
 
+    # print("label to unlabel:", label_to_unlabel_neighbors.shape)
+    # print("all class before concat:", all_class_neighbors.shape)
+
     all_class_neighbors = torch.cat(
         (all_class_neighbors, label_to_unlabel_neighbors), dim=1)
     all_to_unlabel_neighbors = torch.arange(
         num_data, device=device, dtype=all_class_neighbors.dtype).unsqueeze(0)
     all_to_unlabel_neighbors = all_to_unlabel_neighbors.repeat(unlabel_num, 1)
+    # print("all:", all_class_neighbors.shape)
+    # print("all to unlabel:", all_to_unlabel_neighbors.shape)
 
     neighb_indices = []
     for i in range(num_data):
@@ -144,6 +149,7 @@ def supervise_naive_graph(n_class, n_support, n_query, reg=1e-3, device="cpu"):
             neighb_indices.append(
                 all_to_unlabel_neighbors[i-all_class_neighbors.shape[0]])
 #     all_class_neighbors = torch.cat((all_class_neighbors, all_to_unlabel_neighbors), dim=1)
+    # neighb_indices = torch.stack(neighb_indices)
 
     return neighb_indices
 
@@ -195,8 +201,9 @@ class LLE(nn.Module):
                 data, n_neighbors=n_neighbors)
         elif method == "supervise_naive":
             neighb_indices = self.neighb_indices
-            if data.device != self.neighb_indices.device:
-                neighb_indices = neighb_indices.to(data.device)
+            if data.device != self.neighb_indices[0].device:
+                neighb_indices = list(
+                    map(lambda x: x.to(data.device), neighb_indices))
 
         output_torch = barycenter_weights_torch(data, data, neighb_indices)
 

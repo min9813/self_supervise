@@ -23,6 +23,7 @@ import lib.lossfunction as lossfunction
 import lib.utils.logger_config as logger_config
 import lib.utils.average_meter as average_meter
 import lib.utils.epoch_func as epoch_func
+import lib.utils.epoch_func_integrate as epoch_func_integrate
 import lib.utils.get_aug_and_trans as get_aug_and_trans
 import lib.network as network
 import lib.embeddings as embeddings
@@ -105,6 +106,7 @@ def train():
         args.LOG.train_print_iter = 1
 
     args.TRAIN.fp16 = args.TRAIN.fp16 and fp16
+    args.fp16 = args.TRAIN.fp16
 
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
@@ -131,7 +133,7 @@ def train():
                 trn_dataset = dataset.miniimagenet_episode.MiniImageNet(
                     "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
                 # valid_batch_size = args.TRAIN.n_way * \
-                    # (args.TRAIN.n_support + args.TRAIN.n_query) * args.DATA.batch_size
+                # (args.TRAIN.n_support + args.TRAIN.n_query) * args.DATA.batch_size
                 valid_batch_size = args.TRAIN.n_way // args.TEST.n_way
                 val_dataset = dataset.miniimagenet_episode.MiniImageNet(
                     "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
@@ -179,11 +181,13 @@ def train():
         msglogger.info("#"*(30+len(msg)))
     else:
         if args.MODEL.network == "resnet18":
-            net = network.resnet.resnet18(pretrained=False)
-            feature_dim = 512
+            net = network.resnet.resnet18(pretrained=False, output_dim=args.MODEL.output_dim)
+            # print(net)
+            # sdfa
+            feature_dim = args.MODEL.output_dim
         elif args.MODEL.network == "resnet34":
-            net = network.resnet.resnet34(pretrained=False)
-            feature_dim = 512
+            net = network.resnet.resnet34(pretrained=False, output_dim=args.MODEL.output_dim)
+            feature_dim = args.MODEL.output_dim
         elif args.MODEL.network == "resnet50":
             net = network.resnet.resnet50(pretrained=False)
             feature_dim = 2048
@@ -242,28 +246,8 @@ def train():
     else:
         criterion = nn.CrossEntropyLoss()
 
-    if args.MODEL.embedding_flag:
-        if args.MODEL.embedding_algorithm == "lle":
-            embedder = embeddings.locally_linear_embedding.LLE(
-                n_neighbors=args.TRAIN.lle_n_neighbors,
-                n_class=args.TRAIN.n_way,
-                n_support=args.TRAIN.n_support,
-                n_query=args.TRAIN.n_query,
-                device=args.device
-            )
+    trn_embedder, val_embedder = embeddings.meta.get_embedder(args)
 
-        elif args.MODEL.embedding_algorithm == "mds":
-            embedder = embeddings.mds.MDSTorch(
-                metric_type=args.MODEL.mds_metric_type
-            )
-
-        elif args.MODEL.embedding_algorithm == "svd":
-            embedder = embeddings.svd.SVDTorch()
-
-        else:
-            raise NotImplementedError(f"embedding algotirhm \'{args.MODEL.embedding_algorithm}\' not implemented")
-    else:
-        embedder = None
 
     if args.TRAIN.finetune_linear:
         wrapper = network.wrapper.LossWrapLinear(args, net, criterion)
@@ -277,8 +261,13 @@ def train():
                     args, net, head, criterion)
         else:
             if args.DATA.is_episode:
-                wrapper = network.wrapper.LossWrapEpisode(
-                    args, net, head, criterion, embedding=embedder)
+                if "lda" in args.MODEL.embedding_algorithm:
+                    epoch_func = epoch_func_integrate
+                    wrapper = network.wrapper.LossWrapEpisodeLDA(
+                        args, net, head, criterion, trn_embedding=trn_embedder, val_embedding=val_embedder)
+                else:
+                    wrapper = network.wrapper.LossWrapEpisode(
+                        args, net, head, criterion, trn_embedding=trn_embedder, val_embedding=val_embedder)
             else:
                 wrapper = network.wrapper.LossWrap(args, net, head, criterion)
 
@@ -287,11 +276,11 @@ def train():
     if args.run_mode == "test":
         epoch = -1
         # if args.DATA.is_episode:
-            # val_result = epoch_func.valid_epoch(
-                    # wrapper, val_loader, epoch, args, logger=val_logger)
+        # val_result = epoch_func.valid_epoch(
+        # wrapper, val_loader, epoch, args, logger=val_logger)
         # else:
         val_result = epoch_func.valid_inference(
-                    wrapper.model, val_loader, epoch, args, logger=val_logger)
+            wrapper.model, val_loader, epoch, args, logger=val_logger)
         # pass                msg = "Valid: "
         msg = "Valid:"
         for name, value in val_result.items():
@@ -425,25 +414,33 @@ def train():
                 val_msg = "Test: "
                 for name, value in val_result.items():
                     val_msg += "{}:{:.4f} ".format(name, value)
+                val_msg_2 = ""
             elif args.TEST.mode == "knn_eval":
                 # score = val_info["pseudo_acc"]
                 score = val_result["top1"]
                 val_msg = "Test: "
                 for name, value in val_result.items():
                     val_msg += "{}:{:.4f} ".format(name, value)
+                val_msg_2 = ""
+
             # elif args.TEST.mode == "few_shot" and not args.DATA.is_episode:
             elif args.TEST.mode == "few_shot":
-                score = val_result["mean_m_acc_{}_cossim".format(
-                    args.TEST.n_support)]
+                if "lda" in str(trn_embedder):
+                    score = val_result["mean_m_acc_{}_l2euc_2".format(
+                        args.TEST.n_support)]
+                else:
+                    score = val_result["mean_m_acc_{}_cossim".format(
+                        args.TEST.n_support)]
                 val_msg = "Test: "
                 for name, value in val_result.items():
                     if name.startswith("mean"):
                         val_msg += "{}:{:.4f} ".format(name, value)
                 val_msg += "\n"
                 key_list = sorted(list(val_result.keys()))
+                val_msg_2 = ""
                 for name in key_list:
                     if name.startswith("each_"):
-                        val_msg += "{}:{:.4f} ".format(name, val_result[name])
+                        val_msg_2 += "{}:{:.4f} ".format(name, val_result[name])
             # else:
                 # score = val_info["pseudo_acc"]
                 # val_msg = ""
@@ -453,6 +450,7 @@ def train():
                                                                                             args.TRAIN.total_epoch, lr, iter_end, iter_end/epoch)
             msglogger.info(msg)
             msglogger.info(val_msg)
+            msglogger.debug(val_msg_2)
 
             if val_info is not None:
                 msg = "Valid: "

@@ -20,6 +20,7 @@ import scipy
 import lib.embeddings.locally_linear_embedding as locally_linear_embedding
 import lib.utils.average_meter as average_meter
 import lib.lossfunction.metric as metric
+import lib.embeddings as embeddings
 from tqdm import tqdm
 from . import knn
 
@@ -49,13 +50,26 @@ def evaluate_fewshot(features, labels, args):
     sample_class_num = min(args.TEST.n_way, len(sample_class_cands))
     print("sample_class_num:", sample_class_num)
 
-    LLE = locally_linear_embedding.LLE(
-        n_neighbors=args.TEST.lle_n_neighbors,
-        n_class=args.TEST.n_way,
-        n_support=args.TEST.n_support,
-        n_query=args.TEST.n_query,
-        device=args.device
-    )
+    trn_embedder, val_embedder = embeddings.meta.get_embedder(args)
+
+    print("embedder:", val_embedder)
+
+    def calc_accuracy_stats(query_feats_all, query_labels_all, support_mean_feats_all, support_one_feats, support_all_feats, name=""):
+        for method in ("cossim", "l2euc", "innerprod"):
+            result_n = calc_accuracy(query_feats_all, query_labels_all,
+                                     support_mean_feats_all, sampled_class, args, args.TEST.n_support, distance_metric=method)
+            for key, value in result_n.items():
+                meter.add_value("{}_{}{}".format(key, method, name), value)
+            result_one = calc_accuracy(
+                query_feats_all, query_labels_all, support_one_feats, sampled_class, args, num_s=1, distance_metric=method)
+            for key, value in result_one.items():
+                meter.add_value("{}_{}{}".format(key, method, name), value)
+
+            result_knn = calc_accuracy(
+                query_feats_all, query_labels_all, support_all_feats, sampled_class, args, num_s=args.TEST.n_support, distance_metric=method, is_knn=True)
+            for key, value in result_knn.items():
+                meter.add_value("{}_{}{}".format(key, method, name), value)
+
 
     for each_test_idx in tqdm(range(args.TEST.few_shot_n_test)):
         sampled_class = np.random.choice(
@@ -94,30 +108,57 @@ def evaluate_fewshot(features, labels, args):
         support_all_feats = np.array(support_all_feats)
 
         if args.MODEL.embedding_flag:
-            support_all_feats, query_feats_all = embedding_one_episode(
-                support_feats=support_all_feats,
-                query_feats=query_feats_all,
-                embedder=LLE,
-                method=args.MODEL.embedding_method
+            if "lda" in str(val_embedder):
+                features = embedding_one_episode_lda(
+                    support_feats=support_all_feats,
+                    query_feats=query_feats_all,
+                    embedder=val_embedder,
+                    method=args.MODEL.embedding_method
+                )
+
+                for n_dim, each_dim_features in features.items():
+                    support_embeddings = each_dim_features["support"]
+                    query_embeddings = each_dim_features["query"]
+
+                    support_mean_feats_all = np.mean(support_embeddings, axis=1)
+                    support_one_feats = support_embeddings[:, 0]
+
+                    calc_accuracy_stats(
+                        query_feats_all=query_embeddings,
+                        query_labels_all=query_labels_all,
+                        support_mean_feats_all=support_mean_feats_all,
+                        support_one_feats=support_one_feats,
+                        support_all_feats=support_embeddings,
+                        name="_{}".format(n_dim)
+                    )
+
+            else:
+                support_all_feats, query_feats_all = embedding_one_episode(
+                    support_feats=support_all_feats,
+                    query_feats=query_feats_all,
+                    embedder=val_embedder,
+                    method=args.MODEL.embedding_method
+                )
+
+                support_one_feats = support_all_feats[:, 0]
+                support_mean_feats_all = np.mean(support_all_feats, axis=1)
+
+                calc_accuracy_stats(
+                    query_feats_all=query_feats_all,
+                    query_labels_all=query_labels_all,
+                    support_mean_feats_all=support_mean_feats_all,
+                    support_one_feats=support_one_feats,
+                    support_all_feats=support_all_feats
+                )
+
+        else:
+            calc_accuracy_stats(
+                query_feats_all=query_feats_all,
+                query_labels_all=query_labels_all,
+                support_mean_feats_all=support_mean_feats_all,
+                support_one_feats=support_one_feats,
+                support_all_feats=support_all_feats
             )
-
-            support_one_feats = support_all_feats[:, 0]
-            support_mean_feats_all = np.mean(support_all_feats, axis=1)
-
-        for method in ("cossim", "l2euc", "innerprod"):
-            result_n = calc_accuracy(query_feats_all, query_labels_all,
-                                     support_mean_feats_all, sampled_class, args, args.TEST.n_support, distance_metric=method)
-            for key, value in result_n.items():
-                meter.add_value("{}_{}".format(key, method), value)
-            result_one = calc_accuracy(
-                query_feats_all, query_labels_all, support_one_feats, sampled_class, args, num_s=1, distance_metric=method)
-            for key, value in result_one.items():
-                meter.add_value("{}_{}".format(key, method), value)
-
-            result_knn = calc_accuracy(
-                query_feats_all, query_labels_all, support_all_feats, sampled_class, args, num_s=args.TEST.n_support, distance_metric=method, is_knn=True)
-            for key, value in result_knn.items():
-                meter.add_value("{}_{}".format(key, method), value)
 
     val_info = meter.get_summary()
 
@@ -225,10 +266,15 @@ def embedding_one_episode(support_feats, query_feats, embedder, method="naive"):
     """
     n_support, n_class = support_feats.shape[:2]
     # n_query, _ = query_feats.shape[:2]
+    # if "lda" in str(embedder):
+    #     pass
 
-    support_feats = torch.Tensor(support_feats.reshape(n_class*n_support, -1))
+    # else:
+    support_feats = support_feats.reshape(n_class*n_support, -1)
+
+    support_feats = torch.Tensor(support_feats)
     query_feats = torch.Tensor(query_feats)
-
+    
     support_embedding, query_embedding = embedder(
         support_vector=support_feats,
         query_vector=query_feats,
@@ -242,6 +288,54 @@ def embedding_one_episode(support_feats, query_feats, embedder, method="naive"):
     # query_embedding = query_embedding.reshape(n_class, n_query, -1)
 
     return support_embedding, query_embedding
+
+
+def embedding_one_episode_lda(support_feats, query_feats, embedder, method="naive"):
+    """
+    support_feats: (n_class, n_support, dim)
+    query_feats: (n_class*n_query, dim)
+    """
+    n_support, n_class = support_feats.shape[:2]
+    # n_query, _ = query_feats.shape[:2]
+    # if "lda" in str(embedder):
+    #     pass
+
+    # else:
+    # support_feats = support_feats.reshape(n_class*n_support, -1)
+
+    support_feats = torch.Tensor(support_feats)
+    query_feats = torch.Tensor(query_feats)
+    
+    lda_loss, logit, pick_v = embedder(
+        support_vector=support_feats,
+        query_vector=query_feats,
+        method=method
+    )
+
+    transformed_feats = {}
+    support_feats = support_feats.reshape(n_class*n_support, -1)
+    if pick_v.shape[1] > 5:
+        pick_v_dim_list = [2, 3, 5, pick_v.shape[1]]
+    else:
+        pick_v_dim_list = [2, 3, pick_v.shape[1]]
+
+    for dim in pick_v_dim_list:
+        # print(support_feats.shape, pick_v.shape)
+        transformed_train_feats = torch.mm(support_feats, pick_v[:, -dim:])
+        transformed_test_feats = torch.mm(query_feats, pick_v[:, -dim:])
+
+        transformed_train_feats = transformed_train_feats.reshape(n_class, n_support, -1)
+        transformed_feats[dim] = {
+            "support": transformed_train_feats.numpy(),
+            "query": transformed_test_feats.numpy()
+        }
+    # print("finish")
+    # support_embedding = support_embedding.numpy()
+    # query_embedding = query_embedding.numpy()
+
+    # query_embedding = query_embedding.reshape(n_class, n_query, -1)
+
+    return transformed_feats
 
 
 def calc_minimum_weight(sigma_array):
@@ -367,10 +461,16 @@ def calc_accuracy(query_feats_all, query_labels_all, support_feats_all, support_
 
 
 def calc_cossim_dist(feature1, feature2):
-    feature1 = feature1 / \
-        np.sqrt(np.sum(feature1 * feature1, axis=1, keepdims=True))
-    feature2 = feature2 / \
-        np.sqrt(np.sum(feature2 * feature2, axis=1, keepdims=True))
+    # print("norm1 {}:".format(feature1.shape), np.sqrt(np.sum(feature1 * feature1, axis=1, keepdims=True)))
+    # print("norm2 {}:".format(feature2.shape), np.sqrt(np.sum(feature2 * feature2, axis=1, keepdims=True)))
+    feature1_norm = np.sqrt(np.sum(feature1 * feature1, axis=1, keepdims=True))
+    mask = feature1_norm[:, 0] > 1e-4
+    feature1[mask] = feature1[mask] / feature1_norm[mask]
+        
+    feature2_norm = np.sqrt(np.sum(feature2 * feature2, axis=1, keepdims=True))
+    mask = feature2_norm[:, 0] > 1e-4
+    feature2[mask] = feature2[mask] / feature2_norm[mask]
+    
     distance_mat = np.dot(feature1, feature2.T)
     return distance_mat
 
