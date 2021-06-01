@@ -66,6 +66,9 @@ __C.TRAIN.vae_pretrain_freeze = True
 __C.TRAIN.meta_mode = "cossim"
 __C.TRAIN.lle_n_neighbors = 5
 __C.TRAIN.is_normal_cls_loss = False
+__C.TRAIN.train_embedding = True
+__C.TRAIN.lda_cls_loss = True
+__C.TRAIN.lda_loss = True
 
 __C.TEST.neighbor_k = 200
 __C.TEST.batch_size = 2000
@@ -109,11 +112,19 @@ __C.MODEL.linear_layers = []
 __C.MODEL.vae_zdim = 128
 __C.MODEL.vae_layers = []
 __C.MODEL.output_dim = 128
+__C.MODEL.lda_lamb = 0.001
 
 __C.MODEL.embedding_flag = False
 __C.MODEL.embedding_algorithm = "lle"
 __C.MODEL.embedding_method = "naive"
 __C.MODEL.mds_metric_type = "euclidean"
+__C.MODEL.is_lda_svd = False
+__C.MODEL.lda_svd_dim = 64
+__C.MODEL.init_nca_method = "random"
+__C.MODEL.nca_max_iter = 50
+__C.MODEL.nca_stop_diff = 1e-4
+__C.MODEL.nca_lr = 1e-2
+__C.MODEL.nca_scale = 1.
 
 __C.debug = True
 __C.run_mode = "train"

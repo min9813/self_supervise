@@ -26,7 +26,7 @@ DATA:
 
 
 TRAIN:
-  total_epoch: 300
+  total_epoch: 100
   start_epoch: 1
   eval_freq: 200
   fp16: False
@@ -35,11 +35,14 @@ TRAIN:
   shape_aug: False
   logit_scale: 8
   vae: False
-  n_way: 20
+  n_way: 30
   n_support: 5
   n_query: 5
   lle_n_neighbors: 10
   is_normal_cls_loss: True
+  lda_cls_loss: True
+  lda_loss: False
+  meta_mode: euc
 
 TEST:
   test_logit_scale: 8
@@ -47,7 +50,7 @@ TEST:
   batch_size: 2000
   n_way: 5
   n_query: 15
-  n_support: 5
+  n_support: 10
   few_shot_n_test: 600
   distance_metric: cossim
   mode: few_shot
@@ -84,6 +87,11 @@ MODEL:
   embedding_flag: True
   embedding_algorithm: lda
   embedding_method: naive
+
+  is_lda_svd: False
+  lda_svd_dim: 64
+
+  lda_lamb: 0.01
 
 debug: False
 run_mode: train

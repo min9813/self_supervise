@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from . import svd
 
 
 def LDAloss(H, label, lamb=0.1, epsilon=1, need_v=False):
@@ -217,7 +218,7 @@ def split_and_get_data(train_feats, train_labels):
     return splitted_train_feats, new_train_labels, splitted_test_feats, new_test_labels
 
 
-def lda_for_episode(support_vector, query_vector, lamb=0.001, method="naive"):
+def lda_for_episode(support_vector, query_vector, lamb=0.001, method="naive", is_svd=False, svd_dim=64, get_feats=False):
     """
     support_vector: torch.Tensor, (num_class, num_support, D)
     query_vector: torch.Tensor, (num_class*num_query, D)
@@ -233,6 +234,17 @@ def lda_for_episode(support_vector, query_vector, lamb=0.001, method="naive"):
 
     support_vector = support_vector.reshape(n_class*n_support, D)
 
+    if is_svd:
+        svd_projector = svd.SVDTorch()
+        feats = torch.cat([support_vector, query_vector])
+        feats = svd_projector.fit_transform(
+            x=feats,
+            n_components=svd_dim
+        )
+
+        support_vector = feats[:n_class*n_support]
+        query_vector = feats[n_class*n_support:]
+
     lda_loss, w, pick_v = LDAloss(
         H=support_vector,
         label=class_labels,
@@ -247,4 +259,8 @@ def lda_for_episode(support_vector, query_vector, lamb=0.001, method="naive"):
         v=pick_v
     )
 
-    return lda_loss, logit, pick_v
+    if get_feats and is_svd:
+        return lda_loss, logit, pick_v, support_vector, query_vector
+
+    else:
+        return lda_loss, logit, pick_v

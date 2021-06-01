@@ -35,11 +35,13 @@ TRAIN:
   shape_aug: False
   logit_scale: 8
   vae: False
-  n_way: 20
+  n_way: 30
   n_support: 5
   n_query: 5
   lle_n_neighbors: 10
   is_normal_cls_loss: True
+  lda_cls_loss: False
+  meta_mode: euc
 
 TEST:
   test_logit_scale: 8
@@ -84,6 +86,9 @@ MODEL:
   embedding_flag: True
   embedding_algorithm: lda
   embedding_method: naive
+
+  is_lda_svd: False
+  lda_svd_dim: 64
 
 debug: False
 run_mode: train

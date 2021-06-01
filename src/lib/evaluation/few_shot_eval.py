@@ -29,6 +29,11 @@ def check_equal(a, b):
     assert a == b, (a, b)
 
 
+def location():
+    frame = inspect.currentframe().f_back
+    return os.path.basename(frame.f_code.co_filename), frame.f_code.co_name, frame.f_lineno
+
+
 def evaluate_fewshot(features, labels, args):
     meter = average_meter.AverageMeter()
     class2feature = {}
@@ -48,11 +53,11 @@ def evaluate_fewshot(features, labels, args):
         if len(class2feature[c]) > sample_num:
             sample_class_cands.append(c)
     sample_class_num = min(args.TEST.n_way, len(sample_class_cands))
-    print("sample_class_num:", sample_class_num)
+    print("sample_class_num:", sample_class_num, location())
 
     trn_embedder, val_embedder = embeddings.meta.get_embedder(args)
 
-    print("embedder:", val_embedder)
+    print("embedder:", val_embedder, location())
 
     def calc_accuracy_stats(query_feats_all, query_labels_all, support_mean_feats_all, support_one_feats, support_all_feats, name=""):
         for method in ("cossim", "l2euc", "innerprod"):
@@ -80,6 +85,7 @@ def evaluate_fewshot(features, labels, args):
         support_mean_feats_all = []
         support_one_feats = []
         support_all_feats = []
+        # print("sampled class:", sampled_class)
         for label in sampled_class:
             class_sample_num = len(class2feature[label])
             sampled_index = np.random.choice(np.arange(
@@ -113,24 +119,35 @@ def evaluate_fewshot(features, labels, args):
                     support_feats=support_all_feats,
                     query_feats=query_feats_all,
                     embedder=val_embedder,
-                    method=args.MODEL.embedding_method
+                    method=args.MODEL.embedding_method,
+                    is_svd=args.MODEL.is_lda_svd,
+                    svd_dim=args.MODEL.lda_svd_dim
                 )
 
                 for n_dim, each_dim_features in features.items():
                     support_embeddings = each_dim_features["support"]
                     query_embeddings = each_dim_features["query"]
 
-                    support_mean_feats_all = np.mean(support_embeddings, axis=1)
-                    support_one_feats = support_embeddings[:, 0]
+                    support_mean_feats_embed_all = np.mean(support_embeddings, axis=1)
+                    support_one_feats_embed = support_embeddings[:, 0]
 
                     calc_accuracy_stats(
                         query_feats_all=query_embeddings,
                         query_labels_all=query_labels_all,
-                        support_mean_feats_all=support_mean_feats_all,
-                        support_one_feats=support_one_feats,
+                        support_mean_feats_all=support_mean_feats_embed_all,
+                        support_one_feats=support_one_feats_embed,
                         support_all_feats=support_embeddings,
-                        name="_{}".format(n_dim)
+                        name="_lda_{}".format(n_dim)
                     )
+
+
+                calc_accuracy_stats(
+                    query_feats_all=query_feats_all,
+                    query_labels_all=query_labels_all,
+                    support_mean_feats_all=support_mean_feats_all,
+                    support_one_feats=support_one_feats,
+                    support_all_feats=support_all_feats
+                )
 
             else:
                 support_all_feats, query_feats_all = embedding_one_episode(
@@ -290,12 +307,12 @@ def embedding_one_episode(support_feats, query_feats, embedder, method="naive"):
     return support_embedding, query_embedding
 
 
-def embedding_one_episode_lda(support_feats, query_feats, embedder, method="naive"):
+def embedding_one_episode_lda(support_feats, query_feats, embedder, method="naive", is_svd=False, svd_dim=64, lamb=0.001):
     """
-    support_feats: (n_class, n_support, dim)
+    support_feats: (n_support, n_class, dim)
     query_feats: (n_class*n_query, dim)
     """
-    n_support, n_class = support_feats.shape[:2]
+    n_class, n_support = support_feats.shape[:2]
     # n_query, _ = query_feats.shape[:2]
     # if "lda" in str(embedder):
     #     pass
@@ -306,11 +323,26 @@ def embedding_one_episode_lda(support_feats, query_feats, embedder, method="naiv
     support_feats = torch.Tensor(support_feats)
     query_feats = torch.Tensor(query_feats)
     
-    lda_loss, logit, pick_v = embedder(
-        support_vector=support_feats,
-        query_vector=query_feats,
-        method=method
-    )
+    if is_svd:
+        lda_loss, logit, pick_v, support_feats, query_feats = embedder(
+            support_vector=support_feats,
+            query_vector=query_feats,
+            method=method,
+            is_svd=is_svd,
+            svd_dim=svd_dim,
+            lamb=lamb,
+            get_feats=True
+        )
+
+    else:
+        lda_loss, logit, pick_v = embedder(
+            support_vector=support_feats,
+            query_vector=query_feats,
+            method=method,
+            is_svd=is_svd,
+            lamb=lamb,
+            svd_dim=svd_dim
+        )
 
     transformed_feats = {}
     support_feats = support_feats.reshape(n_class*n_support, -1)
@@ -447,6 +479,7 @@ def calc_accuracy(query_feats_all, query_labels_all, support_feats_all, support_
             #     this_label_acc = np.mean(pred_label[this_label_mask] == label)
             #     result["each_{}_{}_mean_acc_{}".format(name, label, topk)] = this_label_acc
     else:
+        # print(distance_mat.shape, support_feats_all.shape, query_feats_all.shape)
         pred_label_index = np.argmax(distance_mat, axis=1)
         pred_label = support_class[pred_label_index]
         mean_acc = np.mean(pred_label == query_labels_all)

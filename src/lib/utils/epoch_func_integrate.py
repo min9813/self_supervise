@@ -43,7 +43,7 @@ def iter_func(wrappered_model, data, args, meter, since, optimizer=None, get_fea
 
     # loss, output = output
     loss = output["loss_total"]
-    logit = output["logit"]
+    # logit = output["logit"]
     if is_train:
         meter.add_value("time_f", time.time()-since)
         since = time.time()
@@ -57,6 +57,7 @@ def iter_func(wrappered_model, data, args, meter, since, optimizer=None, get_fea
 
         meter.add_value("time_b", time.time()-since)
 
+    pseudo_label = output["label_episode"].cpu()
     for key, value in output.items():
         if key.startswith("loss"):
             # print(key, value)
@@ -65,18 +66,18 @@ def iter_func(wrappered_model, data, args, meter, since, optimizer=None, get_fea
         elif key.endswith("ok"):
             meter.add_value(key, value)
 
-        elif key.startswith("lda"):
+        elif key.startswith("lda") and "logit" not in key:
             meter.add_value(key, value)
 
-    pseudo_label = output["label_episode"].cpu()
-    with torch.no_grad():
-        _, pred = torch.max(
-            logit,
-            dim=1
-        )
-        acc = np.mean((pred.cpu() == pseudo_label).numpy())
-
-        meter.add_value("acc", acc)
+        elif key.endswith("logit"):
+            with torch.no_grad():
+                _, pred = torch.max(
+                    value,
+                    dim=1
+                )
+                acc = np.mean((pred.cpu() == pseudo_label).numpy())
+                key = key.replace("logit", "acc")
+                meter.add_value(key, acc)
 
     if get_features:
         features = output["features"]

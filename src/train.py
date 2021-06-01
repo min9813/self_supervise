@@ -22,7 +22,7 @@ import lib.dataset as dataset
 import lib.lossfunction as lossfunction
 import lib.utils.logger_config as logger_config
 import lib.utils.average_meter as average_meter
-import lib.utils.epoch_func as epoch_func
+import lib.utils.epoch_func as epoch_func_normal
 import lib.utils.epoch_func_integrate as epoch_func_integrate
 import lib.utils.get_aug_and_trans as get_aug_and_trans
 import lib.network as network
@@ -248,7 +248,6 @@ def train():
 
     trn_embedder, val_embedder = embeddings.meta.get_embedder(args)
 
-
     if args.TRAIN.finetune_linear:
         wrapper = network.wrapper.LossWrapLinear(args, net, criterion)
     else:
@@ -261,11 +260,12 @@ def train():
                     args, net, head, criterion)
         else:
             if args.DATA.is_episode:
-                if "lda" in args.MODEL.embedding_algorithm:
+                if "lda" in args.MODEL.embedding_algorithm and args.MODEL.embedding_flag:
                     epoch_func = epoch_func_integrate
                     wrapper = network.wrapper.LossWrapEpisodeLDA(
                         args, net, head, criterion, trn_embedding=trn_embedder, val_embedding=val_embedder)
                 else:
+                    epoch_func = epoch_func_normal
                     wrapper = network.wrapper.LossWrapEpisode(
                         args, net, head, criterion, trn_embedding=trn_embedder, val_embedding=val_embedder)
             else:
@@ -426,7 +426,7 @@ def train():
             # elif args.TEST.mode == "few_shot" and not args.DATA.is_episode:
             elif args.TEST.mode == "few_shot":
                 if "lda" in str(trn_embedder):
-                    score = val_result["mean_m_acc_{}_l2euc_2".format(
+                    score = val_result["mean_m_acc_{}_l2euc_lda_2".format(
                         args.TEST.n_support)]
                 else:
                     score = val_result["mean_m_acc_{}_cossim".format(
@@ -450,7 +450,8 @@ def train():
                                                                                             args.TRAIN.total_epoch, lr, iter_end, iter_end/epoch)
             msglogger.info(msg)
             msglogger.info(val_msg)
-            msglogger.debug(val_msg_2)
+            val_logger.debug(msg)
+            val_logger.debug(val_msg_2)
 
             if val_info is not None:
                 msg = "Valid: "
