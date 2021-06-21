@@ -25,6 +25,7 @@ import lib.utils.average_meter as average_meter
 import lib.utils.epoch_func as epoch_func_normal
 import lib.utils.epoch_func_integrate as epoch_func_integrate
 import lib.utils.get_aug_and_trans as get_aug_and_trans
+import lib.utils.io_utils as io_utils
 import lib.network as network
 import lib.embeddings as embeddings
 from torch.optim import lr_scheduler
@@ -120,6 +121,43 @@ def train():
         val_dataset = dataset.feature_dataset.FeatureDataset(
             "val", args, msglogger)
 
+    elif args.MODEL.is_nca_train_two_stage and args.MODEL.embedding_flag and args.MODEL.embedding_algorithm == "nca":
+        # train_loader = torch.utils.data.DataLoader(
+            # trn_dataset, batch_size=args.DATA.batch_size, shuffle=False, num_workers=args.num_workers, drop_last=False)
+
+        resume_net_path_stem = pathlib.Path(args.MODEL.resume_net_path).parent.stem
+        load_train_feature_path = os.path.join(
+            args.DATA.load_feature_dir,
+            args.DATA.dataset,
+            resume_net_path_stem+"_feature_train.pickle"
+        )
+        load_val_feature_path = os.path.join(
+            args.DATA.load_feature_dir,
+            args.DATA.dataset,
+            resume_net_path_stem+"_feature_train.pickle"
+        )
+
+        if os.path.exists(load_train_feature_path):
+            trn_feature_dict = io_utils.load_pickle(load_train_feature_path)
+            val_feature_dict = io_utils.load_pickle(load_val_feature_path)
+
+        else:
+            raise FileNotFoundError("path {} not found!".format(load_train_feature_path))
+
+        trn_dataset = dataset.feature_dataset_imagenet.FeatureDataset(
+            features=trn_feature_dict,
+            split="train",
+            args=args,
+            logger=msglogger
+        )
+        val_dataset = dataset.feature_dataset_imagenet.FeatureDataset(
+            features=val_feature_dict,
+            split="val",
+            args=args,
+            logger=msglogger
+        )
+        valid_batch_size = args.DATA.batch_size
+
     else:
         if args.DATA.dataset == "cifar10":
             trn_dataset = dataset.cifar.Cifar10(
@@ -141,10 +179,26 @@ def train():
                 trn_dataset = dataset.miniimagenet.MiniImageNet(
                     "train", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
                 valid_batch_size = args.DATA.batch_size
-            # val_dataset = dataset.miniimagenet.MiniImageNet(
-                # "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
+                val_dataset = dataset.miniimagenet.MiniImageNet(
+                    "val", args, msglogger, trans, c_aug=c_aug, s_aug=s_aug)
             args.has_same = True
 
+
+            # trn_result, trn_logits, trn_labels = epoch_func.valid_epoch(
+            #     wrapper, train_loader, epoch, args, 
+            #     logger=val_logger, 
+            #     get_features=True, 
+            #     get_features_only=True)
+            # feature_dict = {
+            #     "feature": trn_logits,
+            #     "label": trn_labels
+            # }
+            # io_utils.save_pickle(
+            #     path=load_feature_path,
+            #     data=feature_dict
+            # )
+
+    # else:
     train_loader = torch.utils.data.DataLoader(
         trn_dataset, batch_size=args.DATA.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=True)
     # for data in train_loader:
@@ -185,6 +239,11 @@ def train():
             # print(net)
             # sdfa
             feature_dim = args.MODEL.output_dim
+        
+        elif args.MODEL.network == "resnet12":
+            net = network.resnet.ResNet12(output_dim=args.MODEL.output_dim)
+            feature_dim = args.MODEL.output_dim
+
         elif args.MODEL.network == "resnet34":
             net = network.resnet.resnet34(pretrained=False, output_dim=args.MODEL.output_dim)
             feature_dim = args.MODEL.output_dim
@@ -248,6 +307,10 @@ def train():
 
     trn_embedder, val_embedder = embeddings.meta.get_embedder(args)
 
+    if args.MODEL.embedding_algorithm == "nca" and not args.MODEL.is_instanciate_each_iter:
+        args.MODEL.trn_embedder = trn_embedder
+        args.MODEL.val_embedder = val_embedder
+
     if args.TRAIN.finetune_linear:
         wrapper = network.wrapper.LossWrapLinear(args, net, criterion)
     else:
@@ -264,23 +327,34 @@ def train():
                     epoch_func = epoch_func_integrate
                     wrapper = network.wrapper.LossWrapEpisodeLDA(
                         args, net, head, criterion, trn_embedding=trn_embedder, val_embedding=val_embedder)
+
+                elif "nca" in args.MODEL.embedding_algorithm and args.MODEL.embedding_flag:
+                    epoch_func = epoch_func_integrate
+                    wrapper = network.wrapper.LossWrapEpisodeNCA(
+                        args, net, head, criterion, trn_embedding=trn_embedder, val_embedding=val_embedder)
+
                 else:
                     epoch_func = epoch_func_normal
                     wrapper = network.wrapper.LossWrapEpisode(
                         args, net, head, criterion, trn_embedding=trn_embedder, val_embedding=val_embedder)
             else:
-                wrapper = network.wrapper.LossWrap(args, net, head, criterion)
+                if "nca" in args.MODEL.embedding_algorithm and args.MODEL.embedding_flag:
+                    epoch_func = epoch_func_integrate
+                    wrapper = network.wrapper.LossWrapNCA(args, net, head, criterion, trn_embedding=trn_embedder, val_embedding=val_embedder)
+
+                else:
+                    wrapper = network.wrapper.LossWrap(args, net, head, criterion)
+                    epoch_func = epoch_func_integrate
 
     wrapper = wrapper.cuda()
 
     if args.run_mode == "test":
         epoch = -1
         # if args.DATA.is_episode:
-        # val_result = epoch_func.valid_epoch(
-        # wrapper, val_loader, epoch, args, logger=val_logger)
+            
         # else:
-        val_result = epoch_func.valid_inference(
-            wrapper.model, val_loader, epoch, args, logger=val_logger)
+        val_result = epoch_func.valid_epoch(
+                    wrapper, val_loader, epoch, args, logger=val_logger)
         # pass                msg = "Valid: "
         msg = "Valid:"
         for name, value in val_result.items():
@@ -315,6 +389,13 @@ def train():
                      "weight_deacy": 1e-6},
                 )
 
+            if hasattr(args.MODEL, "trn_embedder"):
+                parameters.append({
+                    "params": args.MODEL.trn_embedder.nca.parameters(), 
+                    "lr": args.OPTIM.lr,
+                    "weight_deacy": 1e-6,
+                })
+
             optimizer = torch.optim.Adam(
                 parameters
             )
@@ -335,6 +416,13 @@ def train():
                     {"params": head.parameters(), "lr": args.OPTIM.lr,
                      "weight_deacy": 1e-6, "momentum": 0.9},
                 )
+            if hasattr(args.MODEL, "trn_embedder"):
+                parameters.append({
+                    "params": args.MODEL.trn_embedder.nca.parameters(), 
+                    "lr": args.OPTIM.lr,
+                    "weight_deacy": 1e-6,
+                })
+
             optimizer = torch.optim.SGD(
                 parameters
             )
@@ -379,11 +467,11 @@ def train():
                 wrapper, train_loader, optimizer, epoch, args, logger=trn_logger)
 
             if args.TRAIN.self_supervised_method.startswith("supervise"):
-                if args.DATA.is_episode:
-                    val_info = epoch_func.valid_epoch(
-                        wrapper, val_loader, epoch, args, logger=val_logger)
-                else:
-                    val_info = None
+                # if args.DATA.is_episode:
+                val_info = epoch_func.valid_epoch(
+                    wrapper, val_loader, epoch, args, logger=val_logger)
+                # else:
+                    # val_info = None
                 # val_info = None
             else:
                 val_info = epoch_func.valid_epoch(
@@ -428,6 +516,11 @@ def train():
                 if "lda" in str(trn_embedder):
                     score = val_result["mean_m_acc_{}_l2euc_lda_2".format(
                         args.TEST.n_support)]
+
+                if "nca" in str(trn_embedder).lower():
+                    score = val_result["mean_m_acc_{}_l2euc_nca_dim2-iter05".format(
+                        args.TEST.n_support)]
+
                 else:
                     score = val_result["mean_m_acc_{}_cossim".format(
                         args.TEST.n_support)]
@@ -470,10 +563,21 @@ def train():
             if is_best:
                 best_score = score
                 best_iter = epoch
+            
+            if args.MODEL.embedding_algorithm == "nca" and not args.MODEL.is_instanciate_each_iter:
+                embedder_info = {
+                    "trn": trn_embedder.nca.state_dict(),
+                    "val": val_embedder.nca.state_dict()
+                }
+
+            else:
+                embedder_info = None
+
             network.model_io.save_model(wrapper, optimizer, val_info, is_best, epoch,
                                         logger=msglogger, multi_gpus=args.multi_gpus,
                                         model_save_dir=args.MODEL.save_dir, delete_old=args.MODEL.delete_old,
-                                        fp16_train=args.TRAIN.fp16, amp=amp)
+                                        fp16_train=args.TRAIN.fp16, amp=amp,
+                                        embedder=embedder_info)
             if scheduler is not None:
                 if args.OPTIM.lr_scheduler == 'patience':
                     scheduler.step(score)

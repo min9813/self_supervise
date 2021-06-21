@@ -69,6 +69,7 @@ __C.TRAIN.is_normal_cls_loss = False
 __C.TRAIN.train_embedding = True
 __C.TRAIN.lda_cls_loss = True
 __C.TRAIN.lda_loss = True
+__C.TRAIN.nca_loss = True
 
 __C.TEST.neighbor_k = 200
 __C.TEST.batch_size = 2000
@@ -125,6 +126,11 @@ __C.MODEL.nca_max_iter = 50
 __C.MODEL.nca_stop_diff = 1e-4
 __C.MODEL.nca_lr = 1e-2
 __C.MODEL.nca_scale = 1.
+__C.MODEL.is_nca_train_two_stage = False
+__C.MODEL.is_instanciate_each_iter = False
+__C.MODEL.stop_criteria = "l2norm"
+__C.MODEL.embedding_finetuning = False
+__C.MODEL.embedding_n_components = 2
 
 __C.debug = True
 __C.run_mode = "train"

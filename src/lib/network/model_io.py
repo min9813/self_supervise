@@ -44,7 +44,9 @@ def load_model(net, path, logger=None, freeze=False):
     return net, epoch+1
 
 
-def save_model(wrapper, optimizer, score, is_best, epoch, logger=None, multi_gpus=False, model_save_dir="../models", delete_old=False, fp16_train=False, amp=None):
+def save_model(wrapper, optimizer, score, is_best, epoch,
+               logger=None, multi_gpus=False, model_save_dir="../models",
+               delete_old=False, fp16_train=False, amp=None, embedder=None):
     if logger is None:
         print_ = print
     else:
@@ -92,6 +94,10 @@ def save_model(wrapper, optimizer, score, is_best, epoch, logger=None, multi_gpu
         "head": head
         # 'amp': amp.state_dict()
     }
+    if embedder is not None:
+        save_dict = {
+            "embedder": embedder
+        }
     if fp16_train:
         save_dict["amp"] = amp.state_dict()
     torch.save(

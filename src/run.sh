@@ -96,4 +96,7 @@
 # python train.py config/fewshot/supervise_lle_embed_supervise_meta_trn5way.yaml
 
 # python train.py config/fewshot/lda_128_ldacls_no_svd.yaml 
-python train.py config/fewshot/lda_128_ldacls_no_svd_10shot.yaml 
+# python train.py config/fewshot/lda_128_ldacls_no_svd_10shot.yaml 
+
+python train.py config/fewshot/supervise_meta_euc_res12.yaml
+python train.py config/fewshot/supervise_meta_euc_noaug_res12.yaml

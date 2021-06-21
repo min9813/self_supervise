@@ -8,6 +8,7 @@ import shutil
 import pickle
 import inspect
 import json
+import math
 import subprocess
 import logging
 import numpy as np
@@ -55,7 +56,14 @@ def evaluate_fewshot(features, labels, args):
     sample_class_num = min(args.TEST.n_way, len(sample_class_cands))
     print("sample_class_num:", sample_class_num, location())
 
-    trn_embedder, val_embedder = embeddings.meta.get_embedder(args)
+    if hasattr(args.MODEL, "trn_embedder"):
+        trn_embedder = args.MODEL.trn_embedder
+        val_embedder = args.MODEL.trn_embedder
+        # val_embedder.nca.A.data = val_embedder.nca.A.data.to("cpu")
+        val_embedder.nca = val_embedder.nca.to("cpu")
+
+    else:
+        trn_embedder, val_embedder = embeddings.meta.get_embedder(args)
 
     print("embedder:", val_embedder, location())
 
@@ -114,15 +122,40 @@ def evaluate_fewshot(features, labels, args):
         support_all_feats = np.array(support_all_feats)
 
         if args.MODEL.embedding_flag:
-            if "lda" in str(val_embedder):
-                features = embedding_one_episode_lda(
-                    support_feats=support_all_feats,
-                    query_feats=query_feats_all,
-                    embedder=val_embedder,
-                    method=args.MODEL.embedding_method,
-                    is_svd=args.MODEL.is_lda_svd,
-                    svd_dim=args.MODEL.lda_svd_dim
-                )
+            if "lda" in str(val_embedder) or "nca" in str(val_embedder).lower():
+                if "lda" in str(val_embedder):
+                    features = embedding_one_episode_lda(
+                        support_feats=support_all_feats,
+                        query_feats=query_feats_all,
+                        embedder=val_embedder,
+                        method=args.MODEL.embedding_method,
+                        is_svd=args.MODEL.is_lda_svd,
+                        svd_dim=args.MODEL.lda_svd_dim
+                    )
+                    embed_name = "lda"
+
+                else:
+                    if args.MODEL.embedding_finetuning:
+                        args.MODEL.is_instanciate_each_iter = True
+                        trn_embedder_new, val_embedder_new = embeddings.meta.get_embedder(args)
+                        args.MODEL.is_instanciate_each_iter = False
+
+                        val_embedder_new.register_nca_state_dict(
+                            base_nca_state_dict=trn_embedder.nca.state_dict()
+                        )
+
+                        val_embedder_here = val_embedder_new
+
+                    else:
+                        val_embedder_here = val_embedder
+
+                    features = embedding_one_episode_nca(
+                        support_feats=support_all_feats, 
+                        query_feats=query_feats_all, 
+                        embedder=val_embedder_here, 
+                        args=args)
+
+                    embed_name = "nca"
 
                 for n_dim, each_dim_features in features.items():
                     support_embeddings = each_dim_features["support"]
@@ -137,9 +170,8 @@ def evaluate_fewshot(features, labels, args):
                         support_mean_feats_all=support_mean_feats_embed_all,
                         support_one_feats=support_one_feats_embed,
                         support_all_feats=support_embeddings,
-                        name="_lda_{}".format(n_dim)
+                        name="_{}_{}".format(embed_name, n_dim)
                     )
-
 
                 calc_accuracy_stats(
                     query_feats_all=query_feats_all,
@@ -178,6 +210,10 @@ def evaluate_fewshot(features, labels, args):
             )
 
     val_info = meter.get_summary()
+
+    if val_embedder is not None and hasattr(val_embedder, "nca"):
+        if val_embedder.nca.A.data.device != args.device:
+            val_embedder.nca = val_embedder.nca.to(args.device)
 
     return val_info
 
@@ -360,6 +396,61 @@ def embedding_one_episode_lda(support_feats, query_feats, embedder, method="naiv
         transformed_feats[dim] = {
             "support": transformed_train_feats.numpy(),
             "query": transformed_test_feats.numpy()
+        }
+    # print("finish")
+    # support_embedding = support_embedding.numpy()
+    # query_embedding = query_embedding.numpy()
+
+    # query_embedding = query_embedding.reshape(n_class, n_query, -1)
+
+    return transformed_feats
+
+
+def embedding_one_episode_nca(support_feats, query_feats, embedder, args):
+    """
+    support_feats: (n_support, n_class, dim)
+    query_feats: (n_class*n_query, dim)
+    """
+    n_class, n_support = support_feats.shape[:2]
+    # n_query, _ = query_feats.shape[:2]
+    # if "lda" in str(embedder):
+    #     pass
+
+    # else:
+    # support_feats = support_feats.reshape(n_class*n_support, -1)
+
+    support_feats = torch.Tensor(support_feats)
+    query_feats = torch.Tensor(query_feats)
+    
+    transformed_feats = {}
+
+    if args.MODEL.embedding_finetuning:
+        max_iter_list = [5, 10, 20, 30, 50]
+
+    else:
+        max_iter_list = [5]
+    for max_iter in max_iter_list:
+        nca_loss, logit, transformed_support_feats, transformed_query_feats = embedder(
+                    support_vector=support_feats,
+                    query_vector=query_feats,
+                    query_label=None,
+                    init_method=args.MODEL.init_nca_method,
+                    max_batch_size=math.ceil(n_class*n_support)+10,
+                    distance_method=args.MODEL.mds_metric_type,
+                    lr=args.MODEL.nca_lr,
+                    max_iter=max_iter,
+                    stop_diff=args.MODEL.nca_stop_diff,
+                    scale=args.MODEL.nca_scale,
+                    get_feats=True,
+                    stop_criteria=args.MODEL.stop_criteria
+                )
+
+        # print(support_feats.shape)
+
+        transformed_support_feats = transformed_support_feats.reshape(n_class, n_support, -1)
+        transformed_feats["dim{}-iter{:0>2}".format(2, max_iter)] = {
+            "support": transformed_support_feats.detach().numpy(),
+            "query": transformed_query_feats.detach().numpy()
         }
     # print("finish")
     # support_embedding = support_embedding.numpy()

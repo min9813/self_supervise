@@ -1,6 +1,6 @@
 DATA:
   dataset: miniimagenet
-  batch_size: 1
+  batch_size: 256
   cifar_root_dir: /home/min9813/project/data/cifar-10-batches-py
   cifar_meta_file: batches.meta
   cifar_train_reg_exp: data_batch*[1|2|3|4|5]
@@ -20,7 +20,7 @@ DATA:
   image_size: 84
 
   feature_root_dir: /home/min9813/project/data/cifar_feature/
-  is_episode: True
+  is_episode: False
   # nb_sample_per_class: 10
   # n_class_train: 20
 
@@ -40,6 +40,7 @@ TRAIN:
   n_query: 5
   lle_n_neighbors: 10
   is_normal_cls_loss: True
+  nca_loss: False
 
 TEST:
   test_logit_scale: 8
@@ -87,6 +88,16 @@ MODEL:
 
   is_lda_svd: True
   lda_svd_dim: 64
+
+  init_nca_method: random
+  nca_max_iter: 10
+  nca_stop_diff: 0.0001
+  nca_lr: 0.01
+  nca_scale: 1.
+  is_instanciate_each_iter: False
+  stop_criteria: l2norm
+
+  embedding_finetuning: True
 
 debug: False
 run_mode: train

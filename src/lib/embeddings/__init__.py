@@ -5,3 +5,4 @@ from . import lpp
 from . import meta
 from . import lpp_robust
 from . import lda
+from . import nca

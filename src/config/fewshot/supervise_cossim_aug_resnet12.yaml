@@ -1,6 +1,6 @@
 DATA:
   dataset: miniimagenet
-  batch_size: 1
+  batch_size: 312
   cifar_root_dir: /home/min9813/project/data/cifar-10-batches-py
   cifar_meta_file: batches.meta
   cifar_train_reg_exp: data_batch*[1|2|3|4|5]
@@ -20,26 +20,16 @@ DATA:
   image_size: 84
 
   feature_root_dir: /home/min9813/project/data/cifar_feature/
-  is_episode: True
-  # nb_sample_per_class: 10
-  # n_class_train: 20
-
 
 TRAIN:
-  total_epoch: 300
+  total_epoch: 100
   start_epoch: 1
-  eval_freq: 200
-  fp16: False
+  fp16: True
   self_supervised_method: supervise_cossim
-  color_aug: False
-  shape_aug: False
+  color_aug: True
+  shape_aug: True
   logit_scale: 8
   vae: False
-  n_way: 30
-  n_support: 5
-  n_query: 5
-  lle_n_neighbors: 10
-  is_normal_cls_loss: True
 
 TEST:
   test_logit_scale: 8
@@ -51,7 +41,6 @@ TEST:
   few_shot_n_test: 600
   distance_metric: cossim
   mode: few_shot
-  lle_n_neighbors: 10
 
 OPTIM:
   optimizer: adam
@@ -72,21 +61,13 @@ MODEL:
   resume_opt_path: ""
   resume_extractor_path: "../models/fewshot/simclr_exp2/best_amp_net.ckpt"
   resume: False
-  network: resnet18
+  network: resnet12
+  output_dim: 512
   # head: [512,256]
   linear_layers: []
   vae_zdim: 128
   vae_layers: [512, 256]
   delete_old: True
-
-  output_dim: 128
-
-  embedding_flag: True
-  embedding_algorithm: nca
-  embedding_method: naive
-
-  is_lda_svd: True
-  lda_svd_dim: 64
 
 debug: False
 run_mode: train

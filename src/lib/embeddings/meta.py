@@ -37,6 +37,20 @@ def get_embedder(args):
             trn_embedder = embeddings.lda.lda_for_episode
             val_embedder = embeddings.lda.lda_for_episode
 
+        elif args.MODEL.embedding_algorithm == "nca":
+            trn_embedder = embeddings.nca.NCATrainer(
+                input_dim=args.MODEL.output_dim,
+                output_dim=args.MODEL.embedding_n_components,
+                max_batch_size=args.DATA.batch_size*2,
+                init_method=args.MODEL.init_nca_method,
+                distance_method=args.MODEL.mds_metric_type,
+                scale=args.MODEL.nca_scale,
+                is_instanciate_each_iter=args.MODEL.is_instanciate_each_iter,
+                device=args.device
+                )
+            val_embedder = embeddings.nca.NCATrainer(
+                input_dim=args.MODEL.output_dim, output_dim=args.MODEL.embedding_n_components, is_instanciate_each_iter=args.MODEL.is_instanciate_each_iter)
+
         else:
             raise NotImplementedError(
                 f"embedding algotirhm \'{args.MODEL.embedding_algorithm}\' not implemented")

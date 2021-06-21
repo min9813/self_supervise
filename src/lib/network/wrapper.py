@@ -35,8 +35,101 @@ class LossWrap(torch.nn.Module):
 
         loss = self.criterion(output, label)
 
-        return loss, output
+        output_all = {
+            "loss_total": loss,
+            "logit": output,
+            "features": raw_logits
+        }
 
+        return output_all
+
+
+class LossWrapNCA(LossWrap):
+    def forward(self, input, label):
+        if self.args.multi_gpus:
+            input, label = input.cuda(), label.cuda()
+        else:
+            input, label = input.to(
+                self.args.device), label.to(self.args.device)
+
+        raw_logits = self.model(input)
+
+        nca_loss, nca_output = self.embedding_vectors(
+            support_vectors=None,
+            support_mean_vectors=None,
+            query_vectors=raw_logits,
+            query_label=label
+        )
+        # print(label)
+        if self.args.TRAIN.is_normal_cls_loss:
+            cls_output = self.head(raw_logits)
+            cls_loss = self.criterion(cls_output, label)
+
+        else:
+            cls_loss = torch.tensor(0, device=nca_loss.device, dtype=nca_loss.dtype)
+            cls_output = None
+
+        loss = nca_loss + cls_loss
+
+        # loss = self.criterion(output, label)
+        output = {
+            "loss_total": loss,
+            "loss_nca": nca_loss,
+            "loss_cls": cls_loss,
+            "nca_output": nca_output,
+            "features": raw_logits,
+        }
+
+        if output is not None:
+            output["logit"] = cls_output
+
+        return output
+
+    def embedding_vectors(self, support_vectors, support_mean_vectors, query_vectors, query_label, use_mean=False):
+        """
+        support_vectors: torch.Tensor, (num_class, num_support, D)
+        query_vectors: torch.Tensor, (num_class*num_query, D)
+        """
+
+        if support_vectors is not None:
+            n_class, n_support, D = support_vectors.shape
+
+        else:
+            batch_size = query_vectors.shape[0]
+
+        # if self.training:
+        lda_loss, logit = self.trn_embedding(
+            support_vector=support_vectors,
+            query_vector=query_vectors,
+            query_label=query_label,
+            init_method=self.args.MODEL.init_nca_method,
+            max_batch_size=batch_size+10,
+            distance_method=self.args.MODEL.mds_metric_type,
+            lr=self.args.MODEL.nca_lr,
+            max_iter=self.args.MODEL.nca_max_iter,
+            stop_diff=self.args.MODEL.nca_stop_diff,
+            scale=self.args.MODEL.nca_scale,
+            stop_criteria=self.args.MODEL.stop_criteria
+        )
+
+        # else:
+        #     lda_loss, logit = self.val_embedding(
+        #         support_vector=support_vectors,
+        #         query_vector=query_vectors,
+        #         query_label=query_label,
+        #         init_method=self.args.MODEL.init_nca_method,
+        #         max_batch_size=batch_size+10,
+        #         distance_method=self.args.MODEL.mds_metric_type,
+        #         lr=self.args.MODEL.nca_lr,
+        #         max_iter=self.args.MODEL.nca_max_iter,
+        #         stop_diff=self.args.MODEL.nca_stop_diff,
+        #         scale=self.args.MODEL.nca_scale,
+        #         stop_criteria=self.args.MODEL.stop_criteria
+        #     )
+
+        # support_embedding = support_embedding.reshape(n_class, n_support, -1)
+
+        return lda_loss, logit
 
 class LossWrapEpisode(LossWrap):
 
@@ -62,12 +155,12 @@ class LossWrapEpisode(LossWrap):
             input, label = input.to(
                 self.args.device), label.to(self.args.device)
 
-        shuffle_index = torch.randperm(B*CXN, device=input.device)
-        shuffled_input = input[shuffle_index]
-        raw_logits = self.model(shuffled_input)
-        # raw_logits = self.model(input)
+        # shuffle_index = torch.randperm(B*CXN, device=input.device)
+        # shuffled_input = input[shuffle_index]
+        # raw_logits = self.model(shuffled_input)
+        raw_logits = self.model(input)
         # raw_logits = raw_logits[shuffle_index]
-        raw_logits[shuffle_index] = raw_logits.clone()
+        # raw_logits[shuffle_index] = raw_logits.clone()
 
         raw_logits = raw_logits.reshape(
             B, self.n_way, n_sample, -1)
@@ -282,6 +375,7 @@ class LossWrapEpisodeLDA(LossWrap):
 
             output["loss_cls"] = loss
             output["normal_logit"] = logit
+        # print("query logit:", query_logit.shape)
 
         output["loss_total"] = total_loss
         output["lda_logit"] = query_logit
@@ -429,6 +523,9 @@ class LossWrapEpisodeNCA(LossWrap):
         }
 
         # if self.args.TRAIN.lda_cls_loss:
+        # print("------------1 ----------")
+        # print(query_logit.shape)
+        # print(label_episode)
         lda_cls_loss = self.criterion(query_logit, label_episode)
         output["loss_lda_logit"] = lda_cls_loss.detach()
 
@@ -446,6 +543,9 @@ class LossWrapEpisodeNCA(LossWrap):
                 logit = logit.reshape(-1, self.n_way)
             else:
                 raise NotImplementedError
+
+            # print(label_episode)
+            # print(logit.shape)
 
             loss = self.criterion(logit, label_episode)
             total_loss += loss
@@ -493,20 +593,23 @@ class LossWrapEpisodeNCA(LossWrap):
                 lr=self.args.MODEL.nca_lr,
                 max_iter=self.args.MODEL.nca_max_iter,
                 stop_diff=self.args.MODEL.nca_stop_diff,
-                scale=self.args.MODEL.nca_scale
+                scale=self.args.MODEL.nca_scale,
+                stop_criteria=self.args.MODEL.stop_criteria
             )
 
         else:
             lda_loss, logit = self.val_embedding(
                 support_vector=support_vectors,
                 query_vector=query_vectors,
+                query_label=query_label,
                 init_method=self.args.MODEL.init_nca_method,
                 max_batch_size=math.ceil(n_class*n_support)+10,
                 distance_method=self.args.MODEL.mds_metric_type,
                 lr=self.args.MODEL.nca_lr,
                 max_iter=self.args.MODEL.nca_max_iter,
                 stop_diff=self.args.MODEL.nca_stop_diff,
-                scale=self.args.MODEL.nca_scale
+                scale=self.args.MODEL.nca_scale,
+                stop_criteria=self.args.MODEL.stop_criteria
             )
 
         # support_embedding = support_embedding.reshape(n_class, n_support, -1)

@@ -57,7 +57,12 @@ def iter_func(wrappered_model, data, args, meter, since, optimizer=None, get_fea
 
         meter.add_value("time_b", time.time()-since)
 
-    pseudo_label = output["label_episode"].cpu()
+    if "label_episode" in output:
+        pseudo_label = output["label_episode"].cpu()
+
+    else:
+        pseudo_label = label
+        
     for key, value in output.items():
         if key.startswith("loss"):
             # print(key, value)
@@ -122,7 +127,7 @@ def train_epoch(wrappered_model, train_loader, optimizer, epoch, args, logger=No
     return train_info
 
 
-def valid_epoch(wrappered_model, train_loader, epoch, args, logger=None, get_features=False):
+def valid_epoch(wrappered_model, train_loader, epoch, args, logger=None, get_features=False, get_features_only=False):
     wrappered_model.eval()
 
     meter = average_meter.AverageMeter()
@@ -130,37 +135,64 @@ def valid_epoch(wrappered_model, train_loader, epoch, args, logger=None, get_fea
     iter_since = time.time()
     since = iter_since
 
-    with torch.no_grad():
-        all_logits = []
-        all_labels = []
-        for batch_idx, data in tqdm(enumerate(train_loader), total=iter_num, desc="validation"):
-            # if get_features:
-            features, labels = iter_func(wrappered_model, data, args, meter, since, get_features=True)
-            all_logits.append(features)
-            all_labels.append(labels)
+    # with torch.no_grad():
+    all_logits = []
+    all_labels = []
+    if args.MODEL.is_instanciate_each_iter:
+        for param in wrappered_model.model.parameters():
+            param.requires_grad = False
+        for param in wrappered_model.head.parameters():
+            param.requires_grad = False
 
-            # else:
-                # iter_func(wrappered_model, data, args, meter, since, get_features=get_features)
+    else:
+        for param in wrappered_model.parameters():
+            param.requires_grad = False
 
-            if args.debug:
-                if batch_idx >= 5:
-                    break
-            since = time.time()
-        # infer_data = torch.cat(infer_data, dim=0)[:save_num]
-        # all_logits = np.concatenate(all_logits)
+    for batch_idx, data in tqdm(enumerate(train_loader), total=iter_num, desc="validation"):
         # if get_features:
-        #     all_labels = np.concatenate(all_labels)
-        #     all_logits = np.concatenate(all_logits)
-            
-        if args.TRAIN.self_supervised_method.startswith("supervise"):
-            all_labels = torch.cat(all_labels)
-            all_logits = torch.cat(all_logits)
-            result = few_shot_eval.evaluate_fewshot(
-                all_logits.numpy(), all_labels.numpy(), args)
+        features, labels = iter_func(wrappered_model, data, args, meter, since, get_features=True)
+        all_logits.append(features)
+        all_labels.append(labels)
+
+        # else:
+            # iter_func(wrappered_model, data, args, meter, since, get_features=get_features)
+
+        if args.debug:
+            if batch_idx >= 5:
+                break
+        since = time.time()
+    # infer_data = torch.cat(infer_data, dim=0)[:save_num]
+    # all_logits = np.concatenate(all_logits)
+    # if get_features:
+    #     all_labels = np.concatenate(all_labels)
+    #     all_logits = np.concatenate(all_logits)
+
+    all_labels = torch.cat(all_labels)
+    all_logits = torch.cat(all_logits)        
+    if args.TRAIN.self_supervised_method.startswith("supervise") and not get_features_only:
+
+        result = few_shot_eval.evaluate_fewshot(
+            all_logits.numpy(), all_labels.numpy(), args)
+
+    else:
+        result = None
 
     train_info = meter.get_summary()
-    train_info.update(result)
+
+    if result is not None:
+        train_info.update(result)
     # inference(wrappered_model.model, infer_data, args, epoch)
+
+    if args.MODEL.is_instanciate_each_iter:
+        for param in wrappered_model.model.parameters():
+            param.requires_grad = True
+
+        for param in wrappered_model.head.parameters():
+            param.requires_grad = True
+
+    else:
+        for param in wrappered_model.parameters():
+            param.requires_grad = True
 
     if get_features:
         return train_info, all_logits, all_labels

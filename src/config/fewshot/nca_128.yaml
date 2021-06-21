@@ -40,6 +40,7 @@ TRAIN:
   n_query: 5
   lle_n_neighbors: 10
   is_normal_cls_loss: True
+  nca_loss: False
 
 TEST:
   test_logit_scale: 8
@@ -87,6 +88,14 @@ MODEL:
 
   is_lda_svd: True
   lda_svd_dim: 64
+
+  init_nca_method: random
+  nca_max_iter: 10
+  nca_stop_diff: 0.001
+  nca_lr: 0.01
+  nca_scale: 1.
+  is_instanciate_each_iter: True
+  stop_criteria: l2norm
 
 debug: False
 run_mode: train

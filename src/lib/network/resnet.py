@@ -53,6 +53,65 @@ class BasicBlock(nn.Module):
         return out
 
 
+class BasicBlockTapNet(nn.Module):
+    expansion = 1
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
+                 base_width=64, dilation=1, norm_layer=None, dropout_p=0.3):
+        super(BasicBlockTapNet, self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        if groups != 1 or base_width != 64:
+            raise ValueError('BasicBlock only supports groups=1 and base_width=64')
+        if dilation > 1:
+            raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
+        # Both self.conv1 and self.downsample layers downsample the input when stride != 1
+        self.conv1 = conv3x3(inplanes, planes, stride)
+        self.bn1 = norm_layer(planes)
+
+        self.conv2 = conv3x3(planes, planes)
+        self.bn2 = norm_layer(planes)
+
+        self.conv3 = conv3x3(planes, planes)
+        self.bn3 = norm_layer(planes)
+
+        self.conv_path = conv3x3(inplanes, planes, stride)
+        self.bn_path = norm_layer(planes)
+
+        self.relu = nn.ReLU(inplace=True)
+
+        self.downsample = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.dropout = nn.Dropout2d(p=dropout_p)
+        self.stride = stride
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+
+        out_h = self.conv_path(x)
+        out_h = self.bn_path(out_h)
+
+        # print("input size:", x.size())
+        out += out_h
+        out = self.relu(out)
+
+        # print(out.size(), "before down sample")
+
+        out = self.downsample(out)
+        # print(out.size(), "after down sample")
+        out = self.dropout(out)
+
+        return out
+
+
 class Bottleneck(nn.Module):
     # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
     # while original implementation places the stride at the first 1x1 convolution(self.conv1)
@@ -100,6 +159,51 @@ class Bottleneck(nn.Module):
         out = self.relu(out)
 
         return out
+
+
+class ResNet12(nn.Module):
+
+    def __init__(self, output_dim):
+        super(ResNet12, self).__init__()
+        self.layer1 = BasicBlockTapNet(
+            inplanes=3,
+            planes=64,
+            dropout_p=0.3
+        )
+
+        self.layer2 = BasicBlockTapNet(
+            inplanes=64,
+            planes=128,
+            dropout_p=0.2
+        )
+
+        self.layer3 = BasicBlockTapNet(
+            inplanes=128,
+            planes=256,
+            dropout_p=0.2
+        )
+
+        self.layer4 = BasicBlockTapNet(
+            inplanes=256,
+            planes=output_dim,
+            dropout_p=0.2
+        )
+
+        self.avg_pool = nn.AdaptiveAvgPool2d(output_size=(1,1))
+
+    def forward(self, x):
+        h = self.layer1(x)
+        h = self.layer2(h)
+        h = self.layer3(h)
+        h = self.layer4(h)
+
+        # print(h.size())
+        h = self.avg_pool(h)
+
+        B, D, _, _ = h.shape
+        h = h.reshape(B, D)
+
+        return h
 
 
 class ResNet(nn.Module):
@@ -244,8 +348,9 @@ def resnet50(pretrained=False, progress=True, **kwargs):
 
 
 if __name__ == "__main__":
-    net = resnet18().eval()
+    # net = resnet18().eval()
+    net = ResNet12(output_dim=512).eval()
     with torch.no_grad():
-        x = torch.randn(1, 3, 32, 32)
+        x = torch.randn(1, 3, 84, 84)
         out = net(x)
         print(out.size())
